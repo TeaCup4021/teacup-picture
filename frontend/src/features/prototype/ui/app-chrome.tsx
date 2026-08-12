@@ -6,7 +6,6 @@ import {
   DownOutlined,
   LogoutOutlined,
   PictureOutlined,
-  ReloadOutlined,
   UploadOutlined,
   UserOutlined,
 } from "@ant-design/icons";
@@ -14,7 +13,7 @@ import { Avatar, Button, Dropdown, Skeleton, Tag } from "antd";
 import type { MenuProps } from "antd";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { usePrototypeLogout, usePrototypeSession, useResetPrototype } from "@/features/prototype";
+import { usePrototypeLogout, usePrototypeSession } from "@/features/prototype";
 
 const navigation = [
   { href: "/", label: "公开图库", icon: <PictureOutlined /> },
@@ -27,9 +26,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
   const router = useRouter();
   const session = usePrototypeSession();
   const logout = usePrototypeLogout();
-  const reset = useResetPrototype();
-
-  if (pathname === "/login") return children;
+  if (pathname === "/login" || pathname === "/register") return children;
 
   const menuItems: MenuProps["items"] = [
     {
@@ -50,15 +47,6 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
       : []),
     { type: "divider" },
     {
-      key: "reset",
-      icon: <ReloadOutlined />,
-      label: "重置原型数据",
-      onClick: () => {
-        reset();
-        router.push("/");
-      },
-    },
-    {
       key: "logout",
       icon: <LogoutOutlined />,
       label: "退出登录",
@@ -73,7 +61,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
           <Link className="brand-link" href="/" aria-label="茶杯图库首页">
             <span className="brand-mark">茶</span>
             <span>茶杯图库</span>
-            <Tag variant="filled">M1 原型</Tag>
+            <Tag variant="filled">M1</Tag>
           </Link>
           <nav className="primary-nav" aria-label="主导航">
             {navigation.map((item) => (

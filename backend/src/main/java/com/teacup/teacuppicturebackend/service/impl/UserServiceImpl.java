@@ -17,10 +17,12 @@ import com.teacup.teacuppicturebackend.model.entity.User;
 import com.teacup.teacuppicturebackend.model.enums.UserRoleEnum;
 import com.teacup.teacuppicturebackend.model.vo.LoginUserVO;
 import com.teacup.teacuppicturebackend.model.vo.UserVO;
+import com.teacup.teacuppicturebackend.service.PersonalSpaceService;
 import com.teacup.teacuppicturebackend.service.UserService;
 import com.teacup.teacuppicturebackend.mapper.UserMapper;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.DigestUtils;
 
@@ -42,7 +44,14 @@ import static com.teacup.teacuppicturebackend.constant.UserConstant.USER_LOGIN_S
 public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     implements UserService{
 
+    private final PersonalSpaceService personalSpaceService;
+
+    public UserServiceImpl(PersonalSpaceService personalSpaceService) {
+        this.personalSpaceService = personalSpaceService;
+    }
+
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public long userRegister(UserRegisterRequest userRegisterRequest) {
 
         //1.校验
@@ -57,7 +66,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户账号过短");
         }
 
-        if (userPassword.length() < 6 || checkPassword.length() < 6) {
+        if (userPassword.length() < 8 || checkPassword.length() < 8) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户密码过短");
         }
 
@@ -84,6 +93,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         if(!save){
             throw new BusinessException(ErrorCode.SYSTEM_ERROR,"注册失败，数据库错误");
         }
+
+        personalSpaceService.getOrCreatePersonalSpace(user.getId());
 
         return user.getId();
     }

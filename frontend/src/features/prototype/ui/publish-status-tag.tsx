@@ -6,6 +6,7 @@ const statusConfiguration: Record<PublishStatus, { color?: string; label: string
   pending: { color: "gold", label: "待审核" },
   approved: { color: "green", label: "已公开" },
   rejected: { color: "red", label: "已驳回" },
+  withdrawn: { color: "default", label: "已撤回" },
 };
 
 export function PublishStatusTag({ status }: Readonly<{ status: PublishStatus }>) {

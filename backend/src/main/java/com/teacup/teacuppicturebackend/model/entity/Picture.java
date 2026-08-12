@@ -111,6 +111,12 @@ public class Picture {
      */
     private Integer isDelete;
 
+    private String visibility;
+
+    private String publishStatus;
+
+    private Date publishedAt;
+
     /**
      * 审核状态：0待审核，1通过，2拒绝
      */

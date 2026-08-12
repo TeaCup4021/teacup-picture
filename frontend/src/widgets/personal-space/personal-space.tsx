@@ -15,6 +15,7 @@ const filters: Array<{ label: string; value: SpaceFilter }> = [
   { label: "待审核", value: "pending" },
   { label: "已公开", value: "approved" },
   { label: "已驳回", value: "rejected" },
+  { label: "已撤回", value: "withdrawn" },
 ];
 
 export function PersonalSpace() {

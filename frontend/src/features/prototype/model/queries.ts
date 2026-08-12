@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { prototypeApi } from "@/features/prototype/api/mock-api";
+import { m1Api } from "@/features/prototype/api/m1-api";
 
 const keys = {
   root: ["prototype"] as const,
@@ -13,17 +13,17 @@ const keys = {
 };
 
 export function usePrototypeSession() {
-  return useQuery({ queryKey: keys.session, queryFn: prototypeApi.getSession });
+  return useQuery({ queryKey: keys.session, queryFn: m1Api.getSession });
 }
 
 export function usePublicPictures() {
-  return useQuery({ queryKey: keys.publicPictures, queryFn: prototypeApi.getPublicPictures });
+  return useQuery({ queryKey: keys.publicPictures, queryFn: m1Api.getPublicPictures });
 }
 
 export function usePersonalPictures(enabled = true) {
   return useQuery({
     queryKey: keys.personalPictures,
-    queryFn: prototypeApi.getPersonalPictures,
+    queryFn: m1Api.getPersonalPictures,
     enabled,
   });
 }
@@ -31,14 +31,14 @@ export function usePersonalPictures(enabled = true) {
 export function usePrototypePicture(pictureId: string) {
   return useQuery({
     queryKey: keys.picture(pictureId),
-    queryFn: () => prototypeApi.getPicture(pictureId),
+    queryFn: () => m1Api.getPicture(pictureId),
   });
 }
 
 export function usePendingReviews(enabled = true) {
   return useQuery({
     queryKey: keys.reviews,
-    queryFn: prototypeApi.getPendingReviews,
+    queryFn: m1Api.getPendingReviews,
     enabled,
   });
 }
@@ -50,33 +50,29 @@ function useRefreshPrototype() {
 
 export function usePrototypeLogin() {
   const refresh = useRefreshPrototype();
-  return useMutation({ mutationFn: prototypeApi.login, onSuccess: refresh });
+  return useMutation({ mutationFn: m1Api.login, onSuccess: refresh });
+}
+
+export function usePrototypeRegister() {
+  return useMutation({ mutationFn: m1Api.register });
 }
 
 export function usePrototypeLogout() {
   const refresh = useRefreshPrototype();
-  return useMutation({ mutationFn: prototypeApi.logout, onSuccess: refresh });
+  return useMutation({ mutationFn: m1Api.logout, onSuccess: refresh });
 }
 
 export function usePrototypeUpload() {
   const refresh = useRefreshPrototype();
-  return useMutation({ mutationFn: prototypeApi.uploadPicture, onSuccess: refresh });
+  return useMutation({ mutationFn: m1Api.uploadPicture, onSuccess: refresh });
 }
 
 export function useSubmitReview() {
   const refresh = useRefreshPrototype();
-  return useMutation({ mutationFn: prototypeApi.submitReview, onSuccess: refresh });
+  return useMutation({ mutationFn: m1Api.submitReview, onSuccess: refresh });
 }
 
 export function useDecideReview() {
   const refresh = useRefreshPrototype();
-  return useMutation({ mutationFn: prototypeApi.decideReview, onSuccess: refresh });
-}
-
-export function useResetPrototype() {
-  const queryClient = useQueryClient();
-  return () => {
-    prototypeApi.reset();
-    void queryClient.invalidateQueries({ queryKey: keys.root });
-  };
+  return useMutation({ mutationFn: m1Api.decideReview, onSuccess: refresh });
 }

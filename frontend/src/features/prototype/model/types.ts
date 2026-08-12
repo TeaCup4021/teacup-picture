@@ -1,6 +1,6 @@
 export type PrototypeRole = "user" | "admin";
 
-export type PublishStatus = "not_requested" | "pending" | "approved" | "rejected";
+export type PublishStatus = "not_requested" | "pending" | "approved" | "rejected" | "withdrawn";
 
 export interface PrototypeUser {
   id: string;
@@ -27,6 +27,7 @@ export interface PrototypePicture {
   likes: number;
   publishStatus: PublishStatus;
   reviewNote?: string;
+  reviewRequestId?: string;
 }
 
 export interface PrototypeDatabase {
@@ -38,11 +39,16 @@ export interface PrototypeDatabase {
 export interface UploadPictureInput {
   title: string;
   description: string;
-  imageUrl: string;
-  width: number;
-  height: number;
+  file?: File;
+  imageUrl?: string;
   category: string;
   tags: string[];
+}
+
+export interface RegisterInput {
+  account: string;
+  password: string;
+  passwordConfirmation: string;
 }
 
 export interface LoginInput {

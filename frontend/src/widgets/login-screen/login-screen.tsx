@@ -5,6 +5,7 @@ import { Alert, Button, Form, Input } from "antd";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import Link from "next/link";
 import { usePrototypeLogin, usePrototypeSession } from "@/features/prototype";
 import type { LoginInput } from "@/features/prototype";
 
@@ -19,13 +20,6 @@ export function LoginScreen() {
       router.replace(session.data.role === "admin" ? "/admin/reviews" : "/spaces/personal");
     }
   }, [router, session.data]);
-
-  const fillAccount = (account: "muyi" | "admin") => {
-    form.setFieldsValue({
-      account,
-      password: account === "admin" ? "admin123" : "demo123",
-    });
-  };
 
   const handleSubmit = (values: LoginInput) => {
     login.mutate(values, {
@@ -52,17 +46,12 @@ export function LoginScreen() {
             <h1 id="login-title">登录</h1>
             <p>进入你的个人空间</p>
           </div>
-          <div className="demo-account-row" aria-label="体验账号">
-            <Button onClick={() => fillAccount("muyi")}>普通用户</Button>
-            <Button onClick={() => fillAccount("admin")}>管理员</Button>
-          </div>
           {login.error ? (
             <Alert type="error" showIcon title={login.error.message} className="form-alert" />
           ) : null}
           <Form
             form={form}
             layout="vertical"
-            initialValues={{ account: "muyi", password: "demo123" }}
             onFinish={handleSubmit}
             requiredMark={false}
           >
@@ -88,6 +77,7 @@ export function LoginScreen() {
               登录
             </Button>
           </Form>
+          <p className="auth-switch">还没有账号？ <Link href="/register">立即注册</Link></p>
           <Button type="link" href="/" className="back-to-gallery">
             返回公开图库
           </Button>

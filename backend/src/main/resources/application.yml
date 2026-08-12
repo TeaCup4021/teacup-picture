@@ -1,5 +1,12 @@
 server:
   port: ${SERVER_PORT:8123}
+  servlet:
+    session:
+      cookie:
+        name: TEACUP_SESSION
+        http-only: true
+        secure: ${SESSION_COOKIE_SECURE:false}
+        same-site: lax
 
 spring:
   application:
@@ -9,14 +16,27 @@ spring:
     url: ${DB_URL:jdbc:mysql://localhost:3306/teacup_picture}
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    clean-disabled: true
+    validate-on-migrate: true
   redis:
     database: ${REDIS_DATABASE:0}
     host: ${REDIS_HOST:127.0.0.1}
     port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
     timeout: ${REDIS_TIMEOUT:5000}
   servlet:
     multipart:
-      max-file-size: 10MB
+      max-file-size: 20MB
+      max-request-size: 22MB
+
+teacup:
+  storage:
+    local-root: ${PICTURE_LOCAL_ROOT:./data/pictures}
+    public-base-url: ${PICTURE_PUBLIC_BASE_URL:http://127.0.0.1:8123/api/v1/public/assets}
 
 mybatis-plus:
   configuration:

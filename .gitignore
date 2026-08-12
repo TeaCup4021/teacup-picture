@@ -8,6 +8,7 @@ Thumbs.db
 # Backend
 backend/target/
 backend/src/main/resources/application-local.yml
+backend/data/
 
 # Frontend
 .pnpm-store/
@@ -24,3 +25,6 @@ frontend/.env*
 *.log
 *.tmp
 tmp/
+
+# Local Docker secrets
+docker/.env

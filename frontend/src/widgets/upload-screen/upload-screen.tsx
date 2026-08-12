@@ -42,6 +42,7 @@ export function UploadScreen() {
   const [form] = Form.useForm<UploadFormValues>();
   const [mode, setMode] = useState<"local" | "url">("local");
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const session = usePrototypeSession();
   const upload = usePrototypeUpload();
@@ -60,6 +61,7 @@ export function UploadScreen() {
     try {
       const nextPreview = await readPicture(file);
       setPreview(nextPreview);
+      setSelectedFile(file);
       if (!form.getFieldValue("title")) {
         form.setFieldValue("title", file.name.replace(/\.[^.]+$/, ""));
       }
@@ -72,6 +74,7 @@ export function UploadScreen() {
   const handleModeChange = (nextMode: string | number) => {
     setMode(nextMode as "local" | "url");
     setPreview(null);
+    setSelectedFile(null);
     setFileError(null);
   };
 
@@ -94,9 +97,8 @@ export function UploadScreen() {
       {
         title: values.title,
         description: values.description?.trim() || "暂无描述",
-        imageUrl: preview.src,
-        width: preview.width,
-        height: preview.height,
+        file: mode === "local" ? selectedFile ?? undefined : undefined,
+        imageUrl: mode === "url" ? values.url?.trim() : undefined,
         category: values.category,
         tags: values.tags
           ? values.tags

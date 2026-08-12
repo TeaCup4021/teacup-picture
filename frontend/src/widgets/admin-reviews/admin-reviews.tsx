@@ -19,7 +19,7 @@ export function AdminReviews() {
 
   const approve = (pictureId: string) => {
     decision.mutate(
-      { pictureId, decision: "approve" },
+      { pictureId, requestId: reviews.data?.find((item) => item.id === pictureId)?.reviewRequestId, decision: "approve" },
       {
         onSuccess: () => void message.success("审核通过，图片已公开"),
         onError: (error) => void message.error(error.message),
@@ -30,7 +30,7 @@ export function AdminReviews() {
   const reject = () => {
     if (!rejectingPicture || !rejectNote.trim()) return;
     decision.mutate(
-      { pictureId: rejectingPicture.id, decision: "reject", note: rejectNote.trim() },
+      { pictureId: rejectingPicture.id, requestId: rejectingPicture.reviewRequestId, decision: "reject", note: rejectNote.trim() },
       {
         onSuccess: () => {
           void message.success("已驳回公开申请");
