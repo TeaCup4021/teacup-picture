@@ -7,6 +7,7 @@
 - 产品范围以 `docs/product-prd.md` 为准。
 - 后端实现事实以 `backend/`、数据库迁移和 OpenAPI 契约为准。
 - 后端已知缺口及实施顺序见 `docs/backend-gap-analysis.md`。
+- 前端视觉和交互基线见 `docs/ui-design/README.md`；产品图不得覆盖 PRD、权限或真实后端能力。
 - 不得使用前端假数据掩盖后端尚未实现的能力。
 
 ## 目录职责

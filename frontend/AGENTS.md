@@ -208,6 +208,16 @@ AI：
 
 视觉方向为“飞书式协作效率 + X 式内容发现”，不复制品牌界面。
 
+设计事实来源：
+
+- 修改页面前必须阅读 `../docs/ui-design/README.md`、对应的 `pages/*.md` 和参考产品图。
+- 产品能力和权限仍以 PRD、后端实现和 OpenAPI 为高优先级事实来源；产品图不单独定义业务能力。
+- `../docs/ui-redesign-proposal.md` 是已被 UI v1.1 取代的历史探索，不得根据其中建议擅自引入 Tailwind、Lucide、Framer Motion 或第二套 UI 体系。
+- 页面必须使用 `src/shared/styles/design-tokens.css` 和 `src/shared/styles/antd-theme.ts`；业务组件不得自行建立主色、背景、圆角和动效体系。
+- 产品图中的 M2～M7 能力只能在对应后端能力和里程碑就绪后实现，不得使用假数据提前伪装。
+- 修改公共视觉组件时至少检查公开图库、图片详情、个人空间、上传和管理后台的影响。
+- 已完成 UI v1.1 走查的页面按 `../docs/ui-design/visual-regression.md` 建立和维护 Playwright 截图。
+
 - 公开图库使用瀑布流和无限滚动。
 - 个人空间、团队空间使用规则网格和分页。
 - 编辑器使用深色工作区，减少画布周围干扰。

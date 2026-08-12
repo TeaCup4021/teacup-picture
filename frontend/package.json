@@ -19,6 +19,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:visual": "node scripts/run-visual-tests.mjs",
+    "test:visual:update": "node scripts/run-visual-tests.mjs --update-snapshots",
     "api:generate": "openapi-typescript ../docs/openapi/m1.yaml -o src/api/generated/schema.d.ts"
   },
   "dependencies": {

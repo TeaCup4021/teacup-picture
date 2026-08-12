@@ -1,16 +1,4 @@
-:root {
-  color-scheme: light;
-  --app-background: #f4f6f7;
-  --app-surface: #ffffff;
-  --app-surface-subtle: #eef1f2;
-  --app-border: #dfe3e6;
-  --app-border-strong: #c8ced3;
-  --app-text: #182025;
-  --app-muted: #687178;
-  --app-accent: #0f766e;
-  --app-accent-soft: #dff3ef;
-  --app-warm: #a65319;
-}
+@import "../shared/styles/design-tokens.css";
 
 * {
   box-sizing: border-box;

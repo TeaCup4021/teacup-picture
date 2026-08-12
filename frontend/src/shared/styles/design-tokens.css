@@ -1,0 +1,62 @@
+:root {
+  color-scheme: light;
+
+  --ui-color-primary: #3370ff;
+  --ui-color-primary-hover: #2b65e8;
+  --ui-color-primary-active: #245bdb;
+  --ui-color-primary-soft: #d9e5ff;
+  --ui-color-primary-subtle: #edf3ff;
+
+  --ui-color-page: #f2f5f8;
+  --ui-color-sidebar: #e7eef6;
+  --ui-color-surface: #ffffff;
+  --ui-color-surface-subtle: #f4f6f8;
+  --ui-color-surface-hover: #f7f9fb;
+
+  --ui-color-text: #1f2329;
+  --ui-color-text-secondary: #646a73;
+  --ui-color-text-tertiary: #8f959e;
+  --ui-color-border: #dfe5ec;
+  --ui-color-border-strong: #c9d1db;
+
+  --ui-color-success: #1d9a72;
+  --ui-color-warning: #d48806;
+  --ui-color-error: #d9363e;
+  --ui-color-info: #3370ff;
+
+  --ui-radius-control: 6px;
+  --ui-radius-panel: 8px;
+  --ui-radius-canvas: 12px;
+
+  --ui-shadow-panel: 0 6px 18px rgb(31 35 41 / 6%);
+  --ui-shadow-elevated: 0 14px 36px rgb(31 35 41 / 12%);
+
+  --ui-motion-fast: 140ms;
+  --ui-motion-base: 180ms;
+  --ui-motion-page: 220ms;
+  --ui-motion-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --ui-sidebar-width: 228px;
+  --ui-header-height: 64px;
+  --ui-content-max-width: 1440px;
+
+  /* Compatibility aliases for the current M1 implementation. */
+  --app-background: var(--ui-color-page);
+  --app-surface: var(--ui-color-surface);
+  --app-surface-subtle: var(--ui-color-surface-subtle);
+  --app-border: var(--ui-color-border);
+  --app-border-strong: var(--ui-color-border-strong);
+  --app-text: var(--ui-color-text);
+  --app-muted: var(--ui-color-text-secondary);
+  --app-accent: var(--ui-color-primary);
+  --app-accent-soft: var(--ui-color-primary-soft);
+  --app-warm: #a56a00;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ui-motion-fast: 1ms;
+    --ui-motion-base: 1ms;
+    --ui-motion-page: 1ms;
+  }
+}
