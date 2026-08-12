@@ -1,0 +1,1237 @@
+openapi: 3.1.0
+info:
+  title: Teacup Picture M1 API
+  version: 1.0.0
+  description: >-
+    M1 target contract for authentication, the default personal space,
+    picture upload and reads, publish review, and the public gallery.
+servers:
+  - url: http://localhost:8123/api/v1
+    description: Local backend
+tags:
+  - name: Auth
+  - name: Personal space
+  - name: Pictures
+  - name: Publish review
+  - name: Public gallery
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Register a user and create the default personal space
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User and personal space created; no session is created
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Create a Cookie session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Logged in
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+            Set-Cookie:
+              description: HttpOnly TEACUP_SESSION Cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Clear the current session
+      description: Idempotent even when the session has already expired.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Session cleared
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+            Set-Cookie:
+              description: Expired TEACUP_SESSION Cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BooleanResponse'
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      summary: Get the current user
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Current user
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /spaces/personal:
+    get:
+      tags: [Personal space]
+      operationId: getPersonalSpace
+      summary: Get the current user's default personal space
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Default personal space
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalSpaceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /pictures/uploads:
+    post:
+      tags: [Pictures]
+      operationId: uploadPicture
+      summary: Upload one local image
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PictureUploadRequest'
+            encoding:
+              tags:
+                style: form
+                explode: true
+      responses:
+        '201':
+          description: Private picture created
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PictureDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+  /pictures/url-imports:
+    post:
+      tags: [Pictures]
+      operationId: importPictureFromUrl
+      summary: Import one image from an HTTP or HTTPS URL
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PictureUrlImportRequest'
+      responses:
+        '201':
+          description: Private picture created
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PictureDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+  /pictures:
+    get:
+      tags: [Pictures]
+      operationId: listPictures
+      summary: List pictures visible in a managed space
+      description: Omitting spaceId selects the current user's personal space.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: spaceId
+          in: query
+          description: Decimal string; defaults to the personal space
+          schema:
+            $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Picture page ordered by createdAt and id descending
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PicturePageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /pictures/{pictureId}:
+    parameters:
+      - $ref: '#/components/parameters/PictureId'
+    get:
+      tags: [Pictures]
+      operationId: getPicture
+      summary: Get a picture visible to the current user
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Picture detail with current user's permissions
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PictureDetailResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /pictures/{pictureId}/publish-requests:
+    parameters:
+      - $ref: '#/components/parameters/PictureId'
+    post:
+      tags: [Publish review]
+      operationId: requestPicturePublication
+      summary: Submit a private picture for public review
+      security:
+        - cookieAuth: []
+      responses:
+        '201':
+          description: Publish request created in pending state
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishRequestResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /admin/publish-requests:
+    get:
+      tags: [Publish review]
+      operationId: listPublishRequests
+      summary: List publish requests for platform review
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/PublishRequestStatus'
+        - name: pictureId
+          in: query
+          schema:
+            $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Publish request page
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishRequestPageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/publish-requests/{requestId}:
+    parameters:
+      - $ref: '#/components/parameters/PublishRequestId'
+    get:
+      tags: [Publish review]
+      operationId: getPublishRequest
+      summary: Get one publish request and its reviewable picture
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Publish request detail
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishRequestResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /admin/publish-requests/{requestId}/approve:
+    parameters:
+      - $ref: '#/components/parameters/PublishRequestId'
+    post:
+      tags: [Publish review]
+      operationId: approvePublishRequest
+      summary: Approve a pending publish request
+      security:
+        - cookieAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovePublishRequest'
+      responses:
+        '200':
+          description: Request approved and picture published
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishRequestResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /admin/publish-requests/{requestId}/reject:
+    parameters:
+      - $ref: '#/components/parameters/PublishRequestId'
+    post:
+      tags: [Publish review]
+      operationId: rejectPublishRequest
+      summary: Reject a pending publish request
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectPublishRequest'
+      responses:
+        '200':
+          description: Request rejected and picture remains private
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishRequestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /admin/pictures/{pictureId}/withdraw:
+    parameters:
+      - $ref: '#/components/parameters/PictureId'
+    post:
+      tags: [Publish review]
+      operationId: withdrawPublishedPicture
+      summary: Withdraw a published picture from the public gallery
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawPictureRequest'
+      responses:
+        '200':
+          description: Picture withdrawn
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PictureDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /public/pictures:
+    get:
+      tags: [Public gallery]
+      operationId: listPublicPictures
+      summary: List approved and currently public pictures
+      parameters:
+        - name: cursor
+          in: query
+          description: Opaque cursor returned by the previous response
+          schema:
+            type: string
+            minLength: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Public gallery slice
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicPictureCursorResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /public/pictures/{pictureId}:
+    parameters:
+      - $ref: '#/components/parameters/PictureId'
+    get:
+      tags: [Public gallery]
+      operationId: getPublicPicture
+      summary: Get an approved and currently public picture
+      responses:
+        '200':
+          description: Public picture detail
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicPictureDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: TEACUP_SESSION
+  headers:
+    RequestId:
+      description: Correlation ID for logs and support
+      schema:
+        type: string
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+    PictureId:
+      name: pictureId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+    PublishRequestId:
+      name: requestId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+  responses:
+    BadRequest:
+      description: Invalid request
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Authentication required or expired
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Authenticated but not authorized
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource does not exist or is not visible
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Unique constraint or state transition conflict
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    PayloadTooLarge:
+      description: Image exceeds 20 MB
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnsupportedMediaType:
+      description: Image format is not JPEG, JPG, PNG, or WebP
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: Request rate limit exceeded
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+        Retry-After:
+          description: Seconds until retry is allowed
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    Id:
+      type: string
+      pattern: '^[1-9][0-9]*$'
+      examples: ['1967927204612521994']
+    Timestamp:
+      type: string
+      format: date-time
+      examples: ['2026-08-11T08:00:00Z']
+    UserRole:
+      type: string
+      enum: [user, admin]
+    SpaceType:
+      type: string
+      enum: [personal]
+    SpaceLevel:
+      type: string
+      enum: [common, professional, flagship]
+    PictureVisibility:
+      type: string
+      enum: [private, public]
+    PicturePublishStatus:
+      type: string
+      enum: [not_requested, pending, approved, rejected, withdrawn]
+    PublishRequestStatus:
+      type: string
+      enum: [pending, approved, rejected, withdrawn]
+    PicturePermission:
+      type: string
+      enum: [picture:view, picture:upload, picture:edit, picture:delete, picture:publish]
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [account, password, passwordConfirmation]
+      properties:
+        account:
+          type: string
+          minLength: 4
+          maxLength: 64
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+          format: password
+        passwordConfirmation:
+          type: string
+          minLength: 8
+          maxLength: 72
+          format: password
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [account, password]
+      properties:
+        account:
+          type: string
+          minLength: 4
+          maxLength: 64
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+          format: password
+    RegistrationResult:
+      type: object
+      additionalProperties: false
+      required: [userId, personalSpaceId]
+      properties:
+        userId:
+          $ref: '#/components/schemas/Id'
+        personalSpaceId:
+          $ref: '#/components/schemas/Id'
+    CurrentUser:
+      type: object
+      additionalProperties: false
+      required: [id, account, name, role, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        account:
+          type: string
+        name:
+          type: string
+        avatarUrl:
+          type: [string, 'null']
+          format: uri
+        profile:
+          type: [string, 'null']
+        role:
+          $ref: '#/components/schemas/UserRole'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+    AuthorSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        name:
+          type: string
+        avatarUrl:
+          type: [string, 'null']
+          format: uri
+    PersonalSpace:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - type
+        - level
+        - maxSize
+        - maxCount
+        - totalSize
+        - totalCount
+        - permissions
+        - createdAt
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/SpaceType'
+        level:
+          $ref: '#/components/schemas/SpaceLevel'
+        maxSize:
+          type: integer
+          minimum: 0
+        maxCount:
+          type: integer
+          minimum: 0
+        totalSize:
+          type: integer
+          minimum: 0
+        totalCount:
+          type: integer
+          minimum: 0
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PicturePermission'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+    PictureUploadRequest:
+      type: object
+      additionalProperties: false
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+        spaceId:
+          $ref: '#/components/schemas/Id'
+        name:
+          type: string
+          maxLength: 128
+        introduction:
+          type: string
+          maxLength: 512
+        category:
+          type: string
+          maxLength: 64
+        tags:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 32
+    PictureUrlImportRequest:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          pattern: '^https?://'
+        spaceId:
+          $ref: '#/components/schemas/Id'
+        name:
+          type: string
+          maxLength: 128
+        introduction:
+          type: string
+          maxLength: 512
+        category:
+          type: string
+          maxLength: 64
+        tags:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 32
+    PictureSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - spaceId
+        - thumbnailUrl
+        - name
+        - tags
+        - size
+        - width
+        - height
+        - format
+        - visibility
+        - publishStatus
+        - author
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        spaceId:
+          $ref: '#/components/schemas/Id'
+        thumbnailUrl:
+          type: string
+          format: uri
+        name:
+          type: string
+        introduction:
+          type: [string, 'null']
+        category:
+          type: [string, 'null']
+        tags:
+          type: array
+          items:
+            type: string
+        size:
+          type: integer
+          minimum: 0
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+        format:
+          type: string
+          enum: [jpeg, jpg, png, webp]
+        dominantColor:
+          type: [string, 'null']
+        visibility:
+          $ref: '#/components/schemas/PictureVisibility'
+        publishStatus:
+          $ref: '#/components/schemas/PicturePublishStatus'
+        author:
+          $ref: '#/components/schemas/AuthorSummary'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+    PictureDetail:
+      allOf:
+        - $ref: '#/components/schemas/PictureSummary'
+        - type: object
+          additionalProperties: false
+          required: [url, permissions]
+          properties:
+            url:
+              type: string
+              format: uri
+            permissions:
+              type: array
+              uniqueItems: true
+              items:
+                $ref: '#/components/schemas/PicturePermission'
+            rejectionReason:
+              type: [string, 'null']
+            reviewedAt:
+              oneOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+    PublicPictureSummary:
+      type: object
+      additionalProperties: false
+      required: [id, thumbnailUrl, name, tags, width, height, author, publishedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        thumbnailUrl:
+          type: string
+          format: uri
+        name:
+          type: string
+        introduction:
+          type: [string, 'null']
+        category:
+          type: [string, 'null']
+        tags:
+          type: array
+          items:
+            type: string
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+        dominantColor:
+          type: [string, 'null']
+        author:
+          $ref: '#/components/schemas/AuthorSummary'
+        publishedAt:
+          $ref: '#/components/schemas/Timestamp'
+    PublicPictureDetail:
+      allOf:
+        - $ref: '#/components/schemas/PublicPictureSummary'
+        - type: object
+          additionalProperties: false
+          required: [url, size, format]
+          properties:
+            url:
+              type: string
+              format: uri
+            size:
+              type: integer
+              minimum: 0
+            format:
+              type: string
+              enum: [jpeg, jpg, png, webp]
+    PublishRequest:
+      type: object
+      additionalProperties: false
+      required: [id, picture, requester, status, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        picture:
+          $ref: '#/components/schemas/PictureSummary'
+        requester:
+          $ref: '#/components/schemas/AuthorSummary'
+        status:
+          $ref: '#/components/schemas/PublishRequestStatus'
+        reviewer:
+          oneOf:
+            - $ref: '#/components/schemas/AuthorSummary'
+            - type: 'null'
+        decisionReason:
+          type: [string, 'null']
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        reviewedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    ApprovePublishRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+          maxLength: 500
+    RejectPublishRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    WithdrawPictureRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    PageMeta:
+      type: object
+      additionalProperties: false
+      required: [page, pageSize, total, totalPages]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+    PicturePage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PictureSummary'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+    PublishRequestPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublishRequest'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+    PublicPictureCursorPage:
+      type: object
+      additionalProperties: false
+      required: [items, hasMore]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicPictureSummary'
+        nextCursor:
+          type: [string, 'null']
+        hasMore:
+          type: boolean
+    FieldError:
+      type: object
+      additionalProperties: false
+      required: [field, reason]
+      properties:
+        field:
+          type: string
+        reason:
+          type: string
+    ErrorBody:
+      type: object
+      additionalProperties: false
+      required: [code, data, message, requestId]
+      properties:
+        code:
+          type: integer
+          minimum: 1
+        data:
+          type: 'null'
+        message:
+          type: string
+        requestId:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+    RegistrationResponse:
+      $ref: '#/components/schemas/BaseRegistrationResult'
+    CurrentUserResponse:
+      $ref: '#/components/schemas/BaseCurrentUser'
+    PersonalSpaceResponse:
+      $ref: '#/components/schemas/BasePersonalSpace'
+    PictureDetailResponse:
+      $ref: '#/components/schemas/BasePictureDetail'
+    PicturePageResponse:
+      $ref: '#/components/schemas/BasePicturePage'
+    PublishRequestResponse:
+      $ref: '#/components/schemas/BasePublishRequest'
+    PublishRequestPageResponse:
+      $ref: '#/components/schemas/BasePublishRequestPage'
+    PublicPictureCursorResponse:
+      $ref: '#/components/schemas/BasePublicPictureCursorPage'
+    PublicPictureDetailResponse:
+      $ref: '#/components/schemas/BasePublicPictureDetail'
+    BooleanResponse:
+      $ref: '#/components/schemas/BaseBoolean'
+    ErrorResponse:
+      $ref: '#/components/schemas/ErrorBody'
+    BaseRegistrationResult:
+      type: object
+      additionalProperties: false
+      required: [code, data, message, requestId]
+      properties:
+        code:
+          type: integer
+          const: 0
+        data:
+          $ref: '#/components/schemas/RegistrationResult'
+        message:
+          type: string
+        requestId:
+          type: string
+    BaseCurrentUser:
+      type: object
+      additionalProperties: false
+      required: [code, data, message, requestId]
+      properties:
+        code:
+          type: integer
+          const: 0
+        data:
+          $ref: '#/components/schemas/CurrentUser'
+        message:
+          type: string
+        requestId:
+          type: string
+    BasePersonalSpace:
+      type: object
+      additionalProperties: false
+      required: [code, data, message, requestId]
+      properties:
+        code:
+          type: integer
+          const: 0
+        data:
+          $ref: '#/components/schemas/PersonalSpace'
+        message:
+          type: string
+        requestId:
+          type: string
+    BasePictureDetail:
+      type: object
+      additionalProperties: false
+      required: [code, data, message, requestId]
+      properties:
+        code:
+          type: integer
+          const: 0
+        data:
+          $ref: '#/components/schemas/PictureDetail'
+        message:
+          type: string
+        requestId:
+          type: string
+    BasePicturePage:
+      type: object
+      additionalProperties: false
+      required: [code, data, message, requestId]
+      properties:
+        code:
+          type: integer
+          const: 0
+        data:
+          $ref: '#/components/schemas/PicturePage'
+        message:
+          type: string
+        requestId:
+          type: string
+    BasePublishRequest:
+      type: object
+      additionalProperties: false
+      required: [code, data, message, requestId]
+      properties:
+        code:
+          type: integer
+          const: 0
+        data:
+          $ref: '#/components/schemas/PublishRequest'
+        message:
+          type: string
+        requestId:
+          type: string
+    BasePublishRequestPage:
+      type: object
+      additionalProperties: false
+      required: [code, data, message, requestId]
+      properties:
+        code:
+          type: integer
+          const: 0
+        data:
+          $ref: '#/components/schemas/PublishRequestPage'
+        message:
+          type: string
+        requestId:
+          type: string
+    BasePublicPictureCursorPage:
+      type: object
+      additionalProperties: false
+      required: [code, data, message, requestId]
+      properties:
+        code:
+          type: integer
+          const: 0
+        data:
+          $ref: '#/components/schemas/PublicPictureCursorPage'
+        message:
+          type: string
+        requestId:
+          type: string
+    BasePublicPictureDetail:
+      type: object
+      additionalProperties: false
+      required: [code, data, message, requestId]
+      properties:
+        code:
+          type: integer
+          const: 0
+        data:
+          $ref: '#/components/schemas/PublicPictureDetail'
+        message:
+          type: string
+        requestId:
+          type: string
+    BaseBoolean:
+      type: object
+      additionalProperties: false
+      required: [code, data, message, requestId]
+      properties:
+        code:
+          type: integer
+          const: 0
+        data:
+          type: boolean
+        message:
+          type: string
+        requestId:
+          type: string

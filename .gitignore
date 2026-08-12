@@ -1,0 +1,26 @@
+# Editors and operating systems
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Backend
+backend/target/
+backend/src/main/resources/application-local.yml
+
+# Frontend
+.pnpm-store/
+frontend/node_modules/
+frontend/.next/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.env*
+!frontend/.env.example
+*.tsbuildinfo
+
+# Logs and temporary files
+*.log
+*.tmp
+tmp/
