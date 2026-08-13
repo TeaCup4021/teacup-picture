@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSyncExternalStore } from "react";
 import { m1Api } from "@/features/prototype/api/m1-api";
 
 const keys = {
@@ -12,8 +13,25 @@ const keys = {
   reviews: ["prototype", "reviews"] as const,
 };
 
+const subscribeToHydration = () => () => undefined;
+
 export function usePrototypeSession() {
-  return useQuery({ queryKey: keys.session, queryFn: m1Api.getSession });
+  const isHydrated = useSyncExternalStore(
+    subscribeToHydration,
+    () => true,
+    () => false,
+  );
+  const query = useQuery({
+    queryKey: keys.session,
+    queryFn: m1Api.getSession,
+    enabled: isHydrated,
+  });
+
+  return {
+    ...query,
+    data: isHydrated ? query.data : undefined,
+    isLoading: !isHydrated || query.isLoading,
+  };
 }
 
 export function usePublicPictures() {

@@ -1,7 +1,7 @@
 "use client";
 
 import { CloudUploadOutlined, SendOutlined } from "@ant-design/icons";
-import { App, Button, Progress, Result, Segmented, Skeleton } from "antd";
+import { App, Button, Result, Segmented, Skeleton } from "antd";
 import { useMemo, useState } from "react";
 import { usePersonalPictures, usePrototypeSession, useSubmitReview } from "@/features/prototype";
 import type { PublishStatus } from "@/features/prototype";
@@ -60,7 +60,6 @@ export function PersonalSpace() {
     pictures.data?.filter((picture) => picture.publishStatus === "approved").length ?? 0;
   const pendingCount =
     pictures.data?.filter((picture) => picture.publishStatus === "pending").length ?? 0;
-  const storagePercent = Math.min(100, Math.round(total * 3.4));
 
   const handleSubmit = (pictureId: string) => {
     submitReview.mutate(pictureId, {
@@ -71,11 +70,11 @@ export function PersonalSpace() {
 
   return (
     <main className="content-shell">
-      <section className="page-heading space-heading" aria-labelledby="space-title">
+      <section className="space-welcome" aria-labelledby="space-title">
         <div>
           <p className="page-kicker">PERSONAL SPACE</p>
-          <h1 id="space-title">{session.data.displayName}的个人空间</h1>
-          <p>默认个人空间 · 普通版</p>
+          <h1 id="space-title">你好，{session.data.displayName}</h1>
+          <p>整理你的图片，并跟进公开审核状态。</p>
         </div>
         <Button type="primary" size="large" icon={<CloudUploadOutlined />} href="/upload">
           上传图片
@@ -94,10 +93,9 @@ export function PersonalSpace() {
           <span>已公开</span>
           <strong>{publicCount}</strong>
         </div>
-        <div className="storage-summary">
-          <span>空间容量</span>
-          <strong>{Math.max(1, Math.round(total * 3.4))} MB / 100 MB</strong>
-          <Progress percent={storagePercent} showInfo={false} size="small" />
+        <div>
+          <span>私有图片</span>
+          <strong>{Math.max(0, total - publicCount - pendingCount)}</strong>
         </div>
       </section>
       <div className="space-toolbar">
@@ -112,14 +110,16 @@ export function PersonalSpace() {
         <Skeleton active paragraph={{ rows: 8 }} />
       ) : filteredPictures.length > 0 ? (
         <div className="personal-grid">
-          {filteredPictures.map((picture) => {
+          {filteredPictures.map((picture, index) => {
             const canSubmit =
               picture.publishStatus === "not_requested" || picture.publishStatus === "rejected";
             return (
               <PictureTile
                 key={picture.id}
                 picture={picture}
+                priority={index === 0}
                 showStatus
+                variant="workspace"
                 action={
                   canSubmit ? (
                     <Button

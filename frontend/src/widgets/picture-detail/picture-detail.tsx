@@ -4,8 +4,6 @@ import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
-  EyeOutlined,
-  HeartOutlined,
   SendOutlined,
 } from "@ant-design/icons";
 import { Alert, App, Button, Descriptions, Result, Skeleton, Space, Tag } from "antd";
@@ -87,18 +85,9 @@ export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
             <Descriptions.Item label="尺寸">
               {item.width} × {item.height}
             </Descriptions.Item>
-            {item.publishStatus === "approved" ? (
-              <Descriptions.Item label="公开数据">
-                <Space size="large">
-                  <span>
-                    <EyeOutlined /> {item.views}
-                  </span>
-                  <span>
-                    <HeartOutlined /> {item.likes}
-                  </span>
-                </Space>
-              </Descriptions.Item>
-            ) : null}
+            <Descriptions.Item label="创建时间">
+              {new Date(item.createdAt).toLocaleDateString("zh-CN")}
+            </Descriptions.Item>
           </Descriptions>
           {item.publishStatus === "pending" && isOwner ? (
             <Alert

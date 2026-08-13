@@ -1,4 +1,3 @@
-import { EyeOutlined, HeartOutlined } from "@ant-design/icons";
 import Link from "next/link";
 import type { PrototypePicture } from "@/features/prototype";
 import { PictureImage } from "@/features/prototype/ui/picture-image";
@@ -9,11 +8,18 @@ interface PictureTileProps {
   picture: PrototypePicture;
   priority?: boolean;
   showStatus?: boolean;
+  variant?: "public" | "workspace";
 }
 
-export function PictureTile({ action, picture, priority, showStatus = false }: PictureTileProps) {
+export function PictureTile({
+  action,
+  picture,
+  priority,
+  showStatus = false,
+  variant = "public",
+}: PictureTileProps) {
   return (
-    <article className="picture-tile">
+    <article className={`picture-tile picture-tile-${variant}`}>
       <Link href={`/pictures/${picture.id}`} className="picture-tile-link">
         <div
           className="picture-tile-media"
@@ -28,18 +34,7 @@ export function PictureTile({ action, picture, priority, showStatus = false }: P
           </div>
           <div className="picture-meta-line">
             <span>{picture.authorName}</span>
-            {picture.publishStatus === "approved" ? (
-              <span className="picture-signals">
-                <span>
-                  <EyeOutlined /> {picture.views}
-                </span>
-                <span>
-                  <HeartOutlined /> {picture.likes}
-                </span>
-              </span>
-            ) : (
-              <span>{new Date(picture.createdAt).toLocaleDateString("zh-CN")}</span>
-            )}
+            <span>{new Date(picture.createdAt).toLocaleDateString("zh-CN")}</span>
           </div>
         </div>
       </Link>
