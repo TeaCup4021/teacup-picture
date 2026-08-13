@@ -1,8 +1,9 @@
 # M1 API 契约决策
 
-状态：Accepted  
-日期：2026-08-11  
-机器可读契约：`docs/openapi/m1.yaml`
+- 状态：Implemented
+- 首次确认：2026-08-11
+- 实现校准：2026-08-12
+- 机器可读契约：`docs/openapi/m1.yaml`
 
 ## 范围
 
@@ -82,6 +83,8 @@ rejected/withdrawn -> 新建 publish request -> pending
 
 参数错误通过 `errors` 返回字段级原因。404 不区分“确实不存在”和“当前调用者不可见”，避免泄露私有资源状态。
 
-## 与当前后端的关系
+## 与当前实现的关系
 
-这是目标契约，不代表当前 Spring 控制器已经实现。现有 `/api/**`、数字审核状态和 DTO 需要通过 v1 适配层迁移；前端只能以 OpenAPI 生成类型为编译期契约，不得回退到旧接口或用假数据冒充接通。
+M1 Spring v1 适配层和前端 API 客户端已经实现本契约。`docs/openapi/m1.yaml` 是 M1 的机器可读契约，`backend/src/main/java/com/teacup/teacuppicturebackend/api/v1/` 与前端生成类型必须和它保持一致。
+
+旧 `/api/**` 控制器只为遗留后端能力保留，不是 M1 前端的兼容接口。新增或修改 M1 行为时不得回退到旧路径，也不得用前端假数据掩盖契约缺口。

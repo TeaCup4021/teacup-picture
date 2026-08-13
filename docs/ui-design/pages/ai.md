@@ -2,7 +2,10 @@
 
 - 路由：`/ai/create`、`/ai/tasks`
 - 里程碑：M2
+- 状态：规划，当前路由与统一 AI 任务接口均不存在
 - 参考图：[ai-create.png](../references/ai-create.png)、[ai-tasks.png](../references/ai-tasks.png)
+
+本页只保存 M2 设计方向。M2 启动、后端任务/配额模型和 OpenAPI 契约确认前，不得创建正式导航入口或用假数据实现任务状态。
 
 ## 创建任务
 

@@ -2,7 +2,10 @@
 
 - 路由：`/spaces/team`、`/spaces/[spaceId]`
 - 里程碑：团队与邀请 M4；实时协作 M5
+- 状态：规划，当前团队创建流程仍有后端阻断问题
 - 参考图：[team-space.png](../references/team-space.png)
+
+本页只保存 M4/M5 设计方向。必须先完成 `backend-gap-analysis.md` 中的团队空间事务修复、所有权模型和邀请契约，才能进入实现。
 
 ## 目标
 

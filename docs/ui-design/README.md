@@ -1,8 +1,11 @@
 # 茶杯图库 UI 设计基线
 
-> 当前版本：UI v1.1  
-> 更新日期：2026-08-12  
-> 状态：已确认的开发目标  
+> 当前版本：UI v1.1
+>
+> 更新日期：2026-08-13
+>
+> 状态：M1 已实现；M2～M7 为规划设计
+>
 > 视觉方向：飞书式协作效率 + 图片内容发现，不复制任何品牌界面
 
 本目录是前端视觉、布局和交互的设计事实来源。所有新页面、页面重构和公共组件修改都必须先阅读本文件、对应页面规范和参考产品图。
@@ -31,19 +34,19 @@
 
 ## 页面索引
 
-| 路由/模块                           | 规范                                               | 里程碑 | 产品图                                                                             |
-| ----------------------------------- | -------------------------------------------------- | ------ | ---------------------------------------------------------------------------------- |
-| `/`                                 | [公开图库](pages/public-gallery.md)                | M1     | [public-gallery.png](references/public-gallery.png)                                |
-| `/pictures/[pictureId]`             | [图片详情](pages/picture-detail.md)                | M1/M6  | [picture-detail.png](references/picture-detail.png)                                |
-| `/spaces/personal`                  | [个人空间](pages/personal-space.md)                | M1/M7  | [personal-space.png](references/personal-space.png)                                |
-| `/upload`                           | [上传图片](pages/upload.md)                        | M1     | [upload.png](references/upload.png)                                                |
-| `/ai/create`、`/ai/tasks`           | [AI 创作与任务](pages/ai.md)                       | M2     | [ai-create.png](references/ai-create.png)、[ai-tasks.png](references/ai-tasks.png) |
-| `/editor/[pictureId]`               | [图片编辑器](pages/editor.md)                      | M3/M5  | [editor.png](references/editor.png)                                                |
-| `/spaces/team`、`/spaces/[spaceId]` | [团队空间](pages/team-space.md)                    | M4/M5  | [team-space.png](references/team-space.png)                                        |
-| `/admin/reviews`                    | [管理员审核](pages/admin-reviews.md)               | M1     | [admin-reviews.png](references/admin-reviews.png)                                  |
-| `/login`、`/register`               | [账号与会话](pages/account.md)                     | M1     | 产品图待补                                                                         |
-| `/notifications`、分享与评论        | [通知、分享与评论](pages/notifications-sharing.md) | M4/M6  | 产品图待补                                                                         |
-| `/spaces/[spaceId]/analytics`       | [空间分析](pages/analytics.md)                     | M7     | 产品图待补                                                                         |
+| 路由/模块                           | 规范                                               | 里程碑 | 当前状态 | 产品图                                                                             |
+| ----------------------------------- | -------------------------------------------------- | ------ | -------- | ---------------------------------------------------------------------------------- |
+| `/`                                 | [公开图库](pages/public-gallery.md)                | M1     | 已实现   | [public-gallery.png](references/public-gallery.png)                                |
+| `/pictures/[pictureId]`             | [图片详情](pages/picture-detail.md)                | M1/M6  | M1 已实现 | [picture-detail.png](references/picture-detail.png)                                |
+| `/spaces/personal`                  | [个人空间](pages/personal-space.md)                | M1/M7  | M1 已实现 | [personal-space.png](references/personal-space.png)                                |
+| `/upload`                           | [上传图片](pages/upload.md)                        | M1     | 已实现   | [upload.png](references/upload.png)                                                |
+| `/admin/reviews`                    | [管理员审核](pages/admin-reviews.md)               | M1     | 已实现   | [admin-reviews.png](references/admin-reviews.png)                                  |
+| `/login`、`/register`               | [账号与会话](pages/account.md)                     | M1     | 已实现   | 产品图待补                                                                         |
+| `/ai/create`、`/ai/tasks`           | [AI 创作与任务](pages/ai.md)                       | M2     | 规划     | [ai-create.png](references/ai-create.png)、[ai-tasks.png](references/ai-tasks.png) |
+| `/editor/[pictureId]`               | [图片编辑器](pages/editor.md)                      | M3/M5  | 规划     | [editor.png](references/editor.png)                                                |
+| `/spaces/team`、`/spaces/[spaceId]` | [团队空间](pages/team-space.md)                    | M4/M5  | 规划     | [team-space.png](references/team-space.png)                                        |
+| `/notifications`、分享与评论        | [通知、分享与评论](pages/notifications-sharing.md) | M4/M6  | 规划     | 产品图待补                                                                         |
+| `/spaces/[spaceId]/analytics`       | [空间分析](pages/analytics.md)                     | M7     | 规划     | 产品图待补                                                                         |
 
 ## 开发前检查
 
@@ -65,6 +68,6 @@
 
 不得直接覆盖旧产品图且不记录变化。重大方向变更创建新的 UI 版本。
 
-## 历史材料
+## 已废弃方向
 
-`../ui-redesign-proposal.md` 是 UI v1.0 探索提案，其中紫蓝渐变、Tailwind、Lucide 和 Framer Motion 等建议未被当前基线采纳。除非另有架构决策，不得根据该历史提案引入新 UI 体系或依赖。
+UI v1.0 的紫蓝渐变、Tailwind、Lucide 和 Framer Motion 探索没有被当前基线采纳，旧提案已删除。需要追溯时查看 Git 历史；新实现不得恢复第二套 UI 或图标体系。
