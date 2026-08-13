@@ -22,6 +22,7 @@ docker/    本地容器化配置
 - 后端使用 Maven，前端使用 pnpm；第一阶段不引入 Nx 或 Turborepo。
 - 后端构建产物、IDE 配置、本地密钥和前端依赖不得提交。
 - 跨端契约变更必须同步更新 OpenAPI/接口文档与缺口分析。
+- 业务图片唯一存储实现为 `teacup-picture` Docker Compose 中的私有 MinIO；完整约束见 `docs/picture-storage.md`。
 
 ## 开发约束
 
@@ -31,6 +32,7 @@ docker/    本地容器化配置
 - 新接口统一放在 `/api/v1`；公开匿名接口仅放在 `/api/v1/public/**`。
 - 身份认证使用服务端 Cookie/Session，不在浏览器持久化服务端密钥或登录令牌。
 - 数据库结构变更必须使用版本化迁移；不得只修改本地数据库或 `create_table.sql`。
+- 不得新增或恢复 COS、OSS、S3、云厂商 SDK、本地文件持久化或浏览器直连对象存储。所有图片来源必须经后端 `PictureStorage` 落入 MinIO，前端只使用后端图片资源 URL。
 - 新功能需要覆盖成功、参数错误、未登录、无权限和资源不存在等关键路径。
 
 ## 验证

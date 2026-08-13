@@ -49,6 +49,8 @@
 - 本地上传支持 JPEG、JPG、PNG、WebP，最大 20 MB。
 - URL 导入与本地上传返回相同的 `PictureDetail`。
 - 上传后图片保持私有，`publishStatus` 初始为 `not_requested`。
+- 图片二进制统一存放在私有 MinIO bucket；数据库保存对象键和元数据，不保存签名 URL。
+- 私有图片内容通过 `/pictures/{pictureId}/content` 鉴权读取；公开图片内容通过 `/public/pictures/{pictureId}/content` 读取且必须再次校验公开审核状态。
 - 私有图片列表使用 `page/pageSize`，默认按 `createdAt desc, id desc` 排序；M1 不开放任意排序字段。
 - 公开图库使用不透明 `cursor` 和 `limit`，适配无限滚动；M1 不锁定搜索、筛选和热度算法。
 

@@ -92,9 +92,14 @@
             <artifactId>mybatis-plus-jsqlparser-4.9</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.qcloud</groupId>
-            <artifactId>cos_api</artifactId>
-            <version>5.6.227</version>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.17</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.gotson</groupId>
+            <artifactId>webp-imageio</artifactId>
+            <version>0.2.2</version>
         </dependency>
 
         <dependency>

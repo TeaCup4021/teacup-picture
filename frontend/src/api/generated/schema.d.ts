@@ -165,6 +165,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pictures/{pictureId}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pictureId: components["parameters"]["PictureId"];
+            };
+            cookie?: never;
+        };
+        /** Read one private picture asset after permission checks */
+        get: operations["getPrivatePictureContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pictures/{pictureId}/publish-requests": {
         parameters: {
             query?: never;
@@ -305,6 +324,25 @@ export interface paths {
         };
         /** Get an approved and currently public picture */
         get: operations["getPublicPicture"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/pictures/{pictureId}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pictureId: components["parameters"]["PictureId"];
+            };
+            cookie?: never;
+        };
+        /** Read one approved public picture asset */
+        get: operations["getPublicPictureContent"];
         put?: never;
         post?: never;
         delete?: never;
@@ -920,6 +958,34 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    getPrivatePictureContent: {
+        parameters: {
+            query?: {
+                variant?: "original" | "thumbnail";
+            };
+            header?: never;
+            path: {
+                pictureId: components["parameters"]["PictureId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Picture binary content */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                    "image/png": unknown;
+                    "image/webp": unknown;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     requestPicturePublication: {
         parameters: {
             query?: never;
@@ -1141,6 +1207,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicPictureDetailResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getPublicPictureContent: {
+        parameters: {
+            query?: {
+                variant?: "original" | "thumbnail";
+            };
+            header?: never;
+            path: {
+                pictureId: components["parameters"]["PictureId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Picture binary content */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                    "image/png": unknown;
+                    "image/webp": unknown;
                 };
             };
             404: components["responses"]["NotFound"];

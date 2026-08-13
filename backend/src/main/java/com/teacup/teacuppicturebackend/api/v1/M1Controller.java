@@ -2,6 +2,8 @@ package com.teacup.teacuppicturebackend.api.v1;
 
 import com.teacup.teacuppicturebackend.api.v1.model.M1Dtos;
 import com.teacup.teacuppicturebackend.model.entity.User;
+import com.teacup.teacuppicturebackend.storage.PictureAssetService;
+import com.teacup.teacuppicturebackend.storage.PictureStorage;
 import org.springframework.core.io.Resource;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -18,11 +20,11 @@ import java.util.List;
 @RequestMapping("/api/v1")
 public class M1Controller {
     private final M1Service service;
-    private final LocalPictureStorage storage;
+    private final PictureAssetService assets;
 
-    public M1Controller(M1Service service, LocalPictureStorage storage) {
+    public M1Controller(M1Service service, PictureAssetService assets) {
         this.service = service;
-        this.storage = storage;
+        this.assets = assets;
     }
 
     @PostMapping("/auth/register")
@@ -151,9 +153,28 @@ public class M1Controller {
         return response(HttpStatus.OK, service.publicPicture(parseId(pictureId)), request);
     }
 
-    @GetMapping("/public/assets/{fileName:.+}")
-    public ResponseEntity<Resource> asset(@PathVariable String fileName) {
-        return ResponseEntity.ok().cacheControl(CacheControl.noCache()).contentType(storage.mediaType(fileName)).body(storage.load(fileName));
+    @GetMapping("/pictures/{pictureId}/content")
+    public ResponseEntity<Resource> privateContent(@PathVariable String pictureId,
+                                                    @RequestParam(defaultValue = "original") String variant,
+                                                    HttpServletRequest request) {
+        PictureStorage.StoredObject object = assets.loadPrivate(service.requireUser(request), parseId(pictureId), variant);
+        return assetResponse(object, true);
+    }
+
+    @GetMapping("/public/pictures/{pictureId}/content")
+    public ResponseEntity<Resource> publicContent(@PathVariable String pictureId,
+                                                   @RequestParam(defaultValue = "original") String variant) {
+        return assetResponse(assets.loadPublic(parseId(pictureId), variant), false);
+    }
+
+    private static ResponseEntity<Resource> assetResponse(PictureStorage.StoredObject object, boolean privateAsset) {
+        CacheControl cache = privateAsset ? CacheControl.noStore() : CacheControl.maxAge(java.time.Duration.ofHours(1)).cachePublic();
+        return ResponseEntity.ok()
+                .cacheControl(cache)
+                .header("X-Content-Type-Options", "nosniff")
+                .contentLength(object.size())
+                .contentType(org.springframework.http.MediaType.parseMediaType(object.contentType()))
+                .body(object.resource());
     }
 
     private static long parseId(String value) {

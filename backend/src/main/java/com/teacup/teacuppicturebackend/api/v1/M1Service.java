@@ -3,6 +3,7 @@ package com.teacup.teacuppicturebackend.api.v1;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.teacup.teacuppicturebackend.api.v1.model.M1Dtos;
 import com.teacup.teacuppicturebackend.mapper.PictureMapper;
 import com.teacup.teacuppicturebackend.mapper.PublishRequestMapper;
@@ -15,6 +16,8 @@ import com.teacup.teacuppicturebackend.model.entity.User;
 import com.teacup.teacuppicturebackend.service.PersonalSpaceService;
 import com.teacup.teacuppicturebackend.service.SpaceService;
 import com.teacup.teacuppicturebackend.service.UserService;
+import com.teacup.teacuppicturebackend.storage.PictureAssetService;
+import com.teacup.teacuppicturebackend.storage.PictureStorage;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -40,11 +43,12 @@ public class M1Service {
     private final PictureMapper pictureMapper;
     private final PublishRequestMapper publishRequestMapper;
     private final UserMapper userMapper;
-    private final LocalPictureStorage storage;
+    private final PictureStorage storage;
+    private final PictureAssetService assets;
 
     public M1Service(UserService userService, PersonalSpaceService personalSpaceService, SpaceService spaceService,
                      PictureMapper pictureMapper, PublishRequestMapper publishRequestMapper,
-                     UserMapper userMapper, LocalPictureStorage storage) {
+                     UserMapper userMapper, PictureStorage storage, PictureAssetService assets) {
         this.userService = userService;
         this.personalSpaceService = personalSpaceService;
         this.spaceService = spaceService;
@@ -52,6 +56,7 @@ public class M1Service {
         this.publishRequestMapper = publishRequestMapper;
         this.userMapper = userMapper;
         this.storage = storage;
+        this.assets = assets;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -112,16 +117,24 @@ public class M1Service {
     public M1Dtos.PictureDetail upload(User user, MultipartFile file, String spaceId, String name,
                                        String introduction, String category, List<String> tags) {
         Space space = resolveOwnedSpace(user, spaceId);
-        LocalPictureStorage.StoredPicture stored = storage.store(file);
-        return savePicture(user, space, stored, name, introduction, category, tags);
+        PictureStorage.StoredPicture stored = storage.store(file, space.getId());
+        return savePictureWithCompensation(user, space, stored, name, introduction, category, tags);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public M1Dtos.PictureDetail importUrl(User user, M1Dtos.UrlImportRequest request) {
         if (request == null || request.url() == null || request.url().isBlank()) throw V1Exception.badRequest("图片 URL 不能为空");
         Space space = resolveOwnedSpace(user, request.spaceId());
-        LocalPictureStorage.StoredPicture stored = storage.importUrl(request.url());
-        return savePicture(user, space, stored, request.name(), request.introduction(), request.category(), request.tags());
+        PictureStorage.StoredPicture stored = storage.importUrl(request.url(), space.getId());
+        return savePictureWithCompensation(user, space, stored, request.name(), request.introduction(), request.category(), request.tags());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public Picture saveGeneratedPicture(User user, PictureStorage.StoredPicture stored, String name,
+                                        String introduction, List<String> tags) {
+        Space space = personalSpaceService.getOrCreatePersonalSpace(user.getId());
+        M1Dtos.PictureDetail detail = savePictureWithCompensation(user, space, stored, name, introduction, "AI 创作", tags);
+        return requirePicture(Long.parseLong(detail.id()));
     }
 
     public M1Dtos.PicturePage listPictures(User user, int page, int pageSize, String spaceId) {
@@ -217,12 +230,26 @@ public class M1Service {
         Picture picture = requirePicture(pictureId);
         if (!"public".equals(picture.getVisibility()) || !"approved".equals(picture.getPublishStatus())) throw V1Exception.notFound();
         User author = userMapper.selectById(picture.getUserId()); M1Dtos.PublicPictureSummary summary = publicSummary(picture, author);
-        return new M1Dtos.PublicPictureDetail(summary.id(), summary.thumbnailUrl(), summary.name(), summary.introduction(), summary.category(), summary.tags(), summary.width(), summary.height(), summary.dominantColor(), summary.author(), summary.publishedAt(), picture.getUrl(), nz(picture.getPicSize()), picture.getPicFormat());
+        return new M1Dtos.PublicPictureDetail(summary.id(), summary.thumbnailUrl(), summary.name(), summary.introduction(), summary.category(), summary.tags(), summary.width(), summary.height(), summary.dominantColor(), summary.author(), summary.publishedAt(), assets.publicUrl(picture.getId(), "original"), nz(picture.getPicSize()), picture.getPicFormat());
     }
 
-    private M1Dtos.PictureDetail savePicture(User user, Space space, LocalPictureStorage.StoredPicture stored, String name, String introduction, String category, List<String> tags) {
+    private M1Dtos.PictureDetail savePictureWithCompensation(User user, Space space, PictureStorage.StoredPicture stored,
+                                                              String name, String introduction, String category, List<String> tags) {
+        try {
+            return savePicture(user, space, stored, name, introduction, category, tags);
+        } catch (RuntimeException exception) {
+            storage.delete(stored.objectKey());
+            storage.delete(stored.thumbnailObjectKey());
+            throw exception;
+        }
+    }
+
+    private M1Dtos.PictureDetail savePicture(User user, Space space, PictureStorage.StoredPicture stored, String name, String introduction, String category, List<String> tags) {
         if (space.getTotalCount() >= space.getMaxCount() || space.getTotalSize() + stored.size() > space.getMaxSize()) throw V1Exception.conflict("个人空间容量不足");
-        Picture picture = new Picture(); picture.setUrl(stored.url()); picture.setThumbnailUrl(stored.url());
+        Picture picture = new Picture(); picture.setId(IdWorker.getId());
+        picture.setUrl(assets.privateUrl(picture.getId(), "original")); picture.setThumbnailUrl(assets.privateUrl(picture.getId(), "thumbnail"));
+        picture.setStorageProvider("minio"); picture.setObjectKey(stored.objectKey()); picture.setContentType(stored.contentType()); picture.setChecksum(stored.checksum());
+        picture.setThumbnailObjectKey(stored.thumbnailObjectKey());
         picture.setName(name == null || name.isBlank() ? "未命名图片" : name.trim()); picture.setIntroduction(blankToNull(introduction));
         picture.setCategory(blankToNull(category)); picture.setTags(JSONUtil.toJsonStr(tags == null ? List.of() : tags));
         picture.setPicSize(stored.size()); picture.setPicWidth(stored.width()); picture.setPicHeight(stored.height());
@@ -246,9 +273,9 @@ public class M1Service {
     private void validatePage(int page, int pageSize) { if (page < 1 || pageSize < 1 || pageSize > 100) throw V1Exception.badRequest("分页参数无效"); }
     private M1Dtos.PublishRequestView publishView(PublishRequest request) { Picture picture = requirePicture(request.getPictureId()); return publishView(request, picture, userMapper.selectById(request.getRequesterId()), request.getReviewerId() == null ? null : userMapper.selectById(request.getReviewerId())); }
     private M1Dtos.PublishRequestView publishView(PublishRequest request, Picture picture, User requester, User reviewer) { return new M1Dtos.PublishRequestView(id(request.getId()), summary(picture, userMapper.selectById(picture.getUserId())), author(requester), request.getStatus(), reviewer == null ? null : author(reviewer), request.getDecisionReason(), instant(request.getCreateTime()), instant(request.getReviewTime())); }
-    private M1Dtos.PictureSummary summary(Picture p, User author) { return new M1Dtos.PictureSummary(id(p.getId()), id(p.getSpaceId()), p.getThumbnailUrl(), p.getName(), p.getIntroduction(), p.getCategory(), tags(p), nz(p.getPicSize()), nzi(p.getPicWidth()), nzi(p.getPicHeight()), p.getPicFormat(), p.getPicColor(), p.getVisibility(), p.getPublishStatus(), author(author), instant(p.getCreateTime()), instant(p.getUpdateTime())); }
-    private M1Dtos.PictureDetail detail(Picture p, User author) { M1Dtos.PictureSummary s = summary(p, author); return new M1Dtos.PictureDetail(s.id(), s.spaceId(), s.thumbnailUrl(), s.name(), s.introduction(), s.category(), s.tags(), s.size(), s.width(), s.height(), s.format(), s.dominantColor(), s.visibility(), s.publishStatus(), s.author(), s.createdAt(), s.updatedAt(), p.getUrl(), OWNER_PERMISSIONS, "rejected".equals(p.getPublishStatus()) ? p.getReviewMessage() : null, instant(p.getReviewTime())); }
-    private M1Dtos.PublicPictureSummary publicSummary(Picture p, User user) { return new M1Dtos.PublicPictureSummary(id(p.getId()), p.getThumbnailUrl(), p.getName(), p.getIntroduction(), p.getCategory(), tags(p), nzi(p.getPicWidth()), nzi(p.getPicHeight()), p.getPicColor(), author(user), instant(p.getPublishedAt())); }
+    private M1Dtos.PictureSummary summary(Picture p, User author) { return new M1Dtos.PictureSummary(id(p.getId()), id(p.getSpaceId()), assets.privateUrl(p.getId(), "thumbnail"), p.getName(), p.getIntroduction(), p.getCategory(), tags(p), nz(p.getPicSize()), nzi(p.getPicWidth()), nzi(p.getPicHeight()), p.getPicFormat(), p.getPicColor(), p.getVisibility(), p.getPublishStatus(), author(author), instant(p.getCreateTime()), instant(p.getUpdateTime())); }
+    private M1Dtos.PictureDetail detail(Picture p, User author) { M1Dtos.PictureSummary s = summary(p, author); return new M1Dtos.PictureDetail(s.id(), s.spaceId(), s.thumbnailUrl(), s.name(), s.introduction(), s.category(), s.tags(), s.size(), s.width(), s.height(), s.format(), s.dominantColor(), s.visibility(), s.publishStatus(), s.author(), s.createdAt(), s.updatedAt(), assets.privateUrl(p.getId(), "original"), OWNER_PERMISSIONS, "rejected".equals(p.getPublishStatus()) ? p.getReviewMessage() : null, instant(p.getReviewTime())); }
+    private M1Dtos.PublicPictureSummary publicSummary(Picture p, User user) { return new M1Dtos.PublicPictureSummary(id(p.getId()), assets.publicUrl(p.getId(), "thumbnail"), p.getName(), p.getIntroduction(), p.getCategory(), tags(p), nzi(p.getPicWidth()), nzi(p.getPicHeight()), p.getPicColor(), author(user), instant(p.getPublishedAt())); }
     private M1Dtos.AuthorSummary author(User u) { return new M1Dtos.AuthorSummary(id(u.getId()), u.getUserName(), u.getUserAvatar()); }
     private List<String> tags(Picture p) { return p.getTags() == null || p.getTags().isBlank() ? List.of() : JSONUtil.toList(p.getTags(), String.class); }
     private String encodeCursor(Picture p) { String raw = p.getPublishedAt().getTime() + ":" + p.getId(); return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8)); }

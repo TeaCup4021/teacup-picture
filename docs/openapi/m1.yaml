@@ -260,6 +260,33 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /pictures/{pictureId}/content:
+    parameters:
+      - $ref: '#/components/parameters/PictureId'
+    get:
+      tags: [Pictures]
+      operationId: getPrivatePictureContent
+      summary: Read one private picture asset after permission checks
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: variant
+          in: query
+          schema:
+            type: string
+            enum: [original, thumbnail]
+            default: original
+      responses:
+        '200':
+          description: Picture binary content
+          content:
+            image/jpeg: {}
+            image/png: {}
+            image/webp: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /pictures/{pictureId}/publish-requests:
     parameters:
       - $ref: '#/components/parameters/PictureId'
@@ -494,6 +521,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PublicPictureDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /public/pictures/{pictureId}/content:
+    parameters:
+      - $ref: '#/components/parameters/PictureId'
+    get:
+      tags: [Public gallery]
+      operationId: getPublicPictureContent
+      summary: Read one approved public picture asset
+      parameters:
+        - name: variant
+          in: query
+          schema:
+            type: string
+            enum: [original, thumbnail]
+            default: original
+      responses:
+        '200':
+          description: Picture binary content
+          content:
+            image/jpeg: {}
+            image/png: {}
+            image/webp: {}
         '404':
           $ref: '#/components/responses/NotFound'
 components:

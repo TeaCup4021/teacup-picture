@@ -6,6 +6,7 @@ import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.teacup.teacuppicturebackend.api.aliyunai.AliYunAiApi;
@@ -14,12 +15,7 @@ import com.teacup.teacuppicturebackend.api.aliyunai.model.CreateOutPaintingTaskR
 import com.teacup.teacuppicturebackend.exception.BusinessException;
 import com.teacup.teacuppicturebackend.exception.ErrorCode;
 import com.teacup.teacuppicturebackend.exception.ThrowUtils;
-import com.teacup.teacuppicturebackend.manager.CosManager;
-import com.teacup.teacuppicturebackend.manager.upload.FilePictureUpload;
-import com.teacup.teacuppicturebackend.manager.upload.PictureUploadTemplate;
-import com.teacup.teacuppicturebackend.manager.upload.UrlPictureUpload;
 import com.teacup.teacuppicturebackend.mapper.PictureMapper;
-import com.teacup.teacuppicturebackend.model.dto.file.UploadPictureResult;
 import com.teacup.teacuppicturebackend.model.dto.picture.*;
 import com.teacup.teacuppicturebackend.model.entity.Picture;
 import com.teacup.teacuppicturebackend.model.entity.Space;
@@ -32,6 +28,9 @@ import com.teacup.teacuppicturebackend.service.PictureService;
 import com.teacup.teacuppicturebackend.service.SpaceService;
 import com.teacup.teacuppicturebackend.service.UserService;
 import com.teacup.teacuppicturebackend.service.observer.impl.PictureCacheClearObserver;
+import com.teacup.teacuppicturebackend.storage.PictureAssetService;
+import com.teacup.teacuppicturebackend.storage.PictureStorage;
+import com.teacup.teacuppicturebackend.storage.PictureStorageDeleteService;
 import com.teacup.teacuppicturebackend.utils.ColorSimilarUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.ibatis.executor.BatchResult;
@@ -45,6 +44,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
@@ -69,20 +69,14 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     @Resource
     private UserService userService;
 
-//    @Resource
-//    private FileManager fileManager;
-
     @Resource
     private SpaceService spaceService;
 
     @Resource
-    private FilePictureUpload filePictureUpload;
+    private PictureStorage pictureStorage;
 
     @Resource
-    private UrlPictureUpload urlPictureUpload;
-
-    @Resource
-    private CosManager cosManager;
+    private PictureAssetService pictureAssets;
 
     @Resource
     private TransactionTemplate transactionTemplate;
@@ -95,6 +89,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private  PictureCacheClearObserver pictureCacheClearObserver;
+
+    @Resource
+    private PictureStorageDeleteService pictureStorageDeleteService;
 
     @Override
     public PictureVO uploadPicture(Object inputSource, PictureUploadRequest pictureUploadRequest, User loginUser) {
@@ -164,62 +161,68 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                 }
             }
         }
-        //上传图片
-        String uploadPathPrefix;
-        if (spaceId == null) {
-            uploadPathPrefix = String.format("public/%s", loginUser.getId());
+        long storageSpaceId = spaceId == null ? 0L : spaceId;
+        PictureStorage.StoredPicture storedPicture;
+        String originalName;
+        if (inputSource instanceof String url) {
+            storedPicture = pictureStorage.importUrl(url, storageSpaceId);
+            originalName = "导入图片";
+        } else if (inputSource instanceof MultipartFile file) {
+            storedPicture = pictureStorage.store(file, storageSpaceId);
+            originalName = file.getOriginalFilename();
         } else {
-            uploadPathPrefix = String.format("space/%s", spaceId);
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "图片来源无效");
         }
-
-        //根据inputSource判断上传方式
-        PictureUploadTemplate pictureUploadTemplate=filePictureUpload;
-        if(inputSource instanceof String){
-            pictureUploadTemplate=urlPictureUpload;
-        }
-        UploadPictureResult uploadPictureResult=pictureUploadTemplate.uploadPicture(inputSource,uploadPathPrefix);
 
         Picture picture = new Picture();
+        picture.setId(pictureId == null ? IdWorker.getId() : pictureId);
         picture.setSpaceId(spaceId);
-        picture.setUrl(uploadPictureResult.getUrl());
-        picture.setThumbnailUrl(uploadPictureResult.getThumbnailUrl());
-        String picName = uploadPictureResult.getPicName();
+        picture.setUrl(pictureAssets.privateUrl(picture.getId(), "original"));
+        picture.setThumbnailUrl(pictureAssets.privateUrl(picture.getId(), "thumbnail"));
+        picture.setStorageProvider("minio");
+        picture.setObjectKey(storedPicture.objectKey());
+        picture.setThumbnailObjectKey(storedPicture.thumbnailObjectKey());
+        picture.setContentType(storedPicture.contentType());
+        picture.setChecksum(storedPicture.checksum());
+        String picName = StrUtil.isBlank(originalName) ? "未命名图片" : originalName;
         if (pictureUploadRequest != null && StrUtil.isNotBlank(pictureUploadRequest.getPicName())) {
             picName = pictureUploadRequest.getPicName();
         }
 
         picture.setName(picName);
-        picture.setPicSize(uploadPictureResult.getPicSize());
-        picture.setPicWidth(uploadPictureResult.getPicWidth());
-        picture.setPicHeight(uploadPictureResult.getPicHeight());
-        picture.setPicScale(uploadPictureResult.getPicScale());
-        picture.setPicFormat(uploadPictureResult.getPicFormat());
-        picture.setPicColor(uploadPictureResult.getPicColor());
+        picture.setPicSize(storedPicture.size());
+        picture.setPicWidth(storedPicture.width());
+        picture.setPicHeight(storedPicture.height());
+        picture.setPicScale(Math.round(storedPicture.width() * 100.0 / storedPicture.height()) / 100.0);
+        picture.setPicFormat(storedPicture.format());
         picture.setUserId(loginUser.getId());
         //补充审核参数
         this.fillReviewParams(picture, loginUser);
         //操作数据库
         if (pictureId != null) {
-            picture.setId(pictureId);
             picture.setEditTime(new Date());
         }
 
-        //todo 自行实现，如果是更新图片，清理cos中的资源
-
         Long finalSpaceId = spaceId;
-        transactionTemplate.execute(status -> {
-            boolean result = this.saveOrUpdate(picture);
-            ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
-            if (finalSpaceId != null) {
-                boolean update = spaceService.lambdaUpdate()
-                        .eq(Space::getId, finalSpaceId)
-                        .setSql("totalSize = totalSize + " + picture.getPicSize())
-                        .setSql("totalCount = totalCount + 1")
-                        .update();
-                ThrowUtils.throwIf(!update, ErrorCode.OPERATION_ERROR, "额度更新失败");
-            }
-            return picture;
-        });
+        try {
+            transactionTemplate.execute(status -> {
+                boolean result = this.saveOrUpdate(picture);
+                ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
+                if (finalSpaceId != null) {
+                    boolean update = spaceService.lambdaUpdate()
+                            .eq(Space::getId, finalSpaceId)
+                            .setSql("totalSize = totalSize + " + picture.getPicSize())
+                            .setSql("totalCount = totalCount + 1")
+                            .update();
+                    ThrowUtils.throwIf(!update, ErrorCode.OPERATION_ERROR, "额度更新失败");
+                }
+                return picture;
+            });
+        } catch (RuntimeException exception) {
+            pictureStorage.delete(storedPicture.objectKey());
+            pictureStorage.delete(storedPicture.thumbnailObjectKey());
+            throw exception;
+        }
 
         ClearEvent uploadEvent = ClearEvent.of("UPDATE", "PICTURE", picture.getId());
         if (pictureCacheClearObserver.supports(uploadEvent)) {
@@ -434,7 +437,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         if (pictureCacheClearObserver.supports(deleteEvent)) {
             pictureCacheClearObserver.handleClearEvent(deleteEvent);
         }
-        this.clearPictureFile(oldPicture);
+        pictureStorageDeleteService.enqueue(oldPicture);
         return true;
 
     }
@@ -542,12 +545,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             return;
         }
 
-        cosManager.deleteObject(oldPicture.getUrl());
-
-        String thumbnailUrl = oldPicture.getThumbnailUrl();
-        if (StrUtil.isNotBlank(thumbnailUrl)) {
-            cosManager.deleteObject(thumbnailUrl);
-        }
+        pictureStorage.delete(oldPicture.getObjectKey());
+        pictureStorage.delete(oldPicture.getThumbnailObjectKey());
     }
 
     @Override

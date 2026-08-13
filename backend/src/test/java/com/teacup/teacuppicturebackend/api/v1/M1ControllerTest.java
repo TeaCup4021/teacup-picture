@@ -2,6 +2,8 @@ package com.teacup.teacuppicturebackend.api.v1;
 
 import com.teacup.teacuppicturebackend.api.v1.model.M1Dtos;
 import com.teacup.teacuppicturebackend.model.entity.User;
+import com.teacup.teacuppicturebackend.storage.PictureAssetService;
+import com.teacup.teacuppicturebackend.storage.PictureStorage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -24,13 +26,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class M1ControllerTest {
     MockMvc mockMvc;
     M1Service service = mock(M1Service.class);
-    LocalPictureStorage storage = mock(LocalPictureStorage.class);
+    PictureAssetService assets = mock(PictureAssetService.class);
 
     @BeforeEach
     void setUp() throws Exception {
         RequestIdFilter filter = new RequestIdFilter();
         filter.init(new MockFilterConfig());
-        mockMvc = MockMvcBuilders.standaloneSetup(new M1Controller(service, storage))
+        mockMvc = MockMvcBuilders.standaloneSetup(new M1Controller(service, assets))
                 .setControllerAdvice(new V1ExceptionHandler())
                 .addFilters(filter)
                 .build();
@@ -77,5 +79,34 @@ class M1ControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("TEACUP_SESSION=;")))
                 .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Max-Age=0")));
+    }
+
+    @Test
+    void privateContentRequiresLogin() throws Exception {
+        when(service.requireUser(any())).thenThrow(V1Exception.unauthorized());
+        mockMvc.perform(get("/api/v1/pictures/31/content"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40100));
+    }
+
+    @Test
+    void publicContentReturnsNotFoundWhenPictureIsNotPublic() throws Exception {
+        when(assets.loadPublic(31L, "original")).thenThrow(V1Exception.notFound());
+        mockMvc.perform(get("/api/v1/public/pictures/31/content"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(40400));
+    }
+
+    @Test
+    void privateContentReturnsObjectMetadata() throws Exception {
+        User user = new User(); user.setId(11L);
+        PictureStorage.StoredObject object = new PictureStorage.StoredObject(
+                new org.springframework.core.io.ByteArrayResource(new byte[]{1, 2, 3}), 3, "image/png", "original.png");
+        when(service.requireUser(any())).thenReturn(user);
+        when(assets.loadPrivate(user, 31L, "original")).thenReturn(object);
+        mockMvc.perform(get("/api/v1/pictures/31/content"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", "image/png"))
+                .andExpect(header().string("Content-Length", "3"));
     }
 }

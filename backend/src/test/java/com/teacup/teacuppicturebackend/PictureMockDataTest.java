@@ -2,30 +2,20 @@ package com.teacup.teacuppicturebackend;
 
 import com.teacup.teacuppicturebackend.model.entity.Picture;
 import com.teacup.teacuppicturebackend.service.PictureService;
-import com.qcloud.cos.COSClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
 import java.util.List;
 
-@SpringBootTest(properties = {
-        "cos.client.secretId=dummy",
-        "cos.client.secretKey=dummy",
-        "cos.client.region=ap-beijing",
-        "cos.client.bucket=dummy"
-})
+@SpringBootTest
 @Tag("integration")
 public class PictureMockDataTest {
 
     @Resource
     private PictureService pictureService;
-
-    @MockBean
-    private COSClient cosClient;
 
     @Test
     public void mockPictureData() {

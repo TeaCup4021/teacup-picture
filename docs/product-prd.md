@@ -124,7 +124,7 @@
 - 邀请和通知。
 - 协作会话和操作记录。
 
-团队空间删除后立即永久删除，不能恢复。删除前必须展示完整影响范围，要求所有者输入空间名称并重新验证当前账号密码。删除过程终止进行中的编辑和 AI 任务，并清理图片、COS 文件、版本、评论、分享、邀请、成员关系和协作数据。系统只保留不含图片内容的安全审计事件。
+团队空间删除后立即永久删除，不能恢复。删除前必须展示完整影响范围，要求所有者输入空间名称并重新验证当前账号密码。删除过程终止进行中的编辑和 AI 任务，并清理图片、MinIO 对象、版本、评论、分享、邀请、成员关系和协作数据。系统只保留不含图片内容的安全审计事件。
 
 ### 4.4 Draft / Picture Version
 
@@ -519,8 +519,9 @@ Spring Boot DTO / OpenAPI
 
 - 公开图库和图片详情使用 Next.js Image 与缩略图。
 - 管理页面优先加载缩略图，详情操作时加载原图。
-- 编辑器使用已配置 CORS 的原始图片 URL。
-- COS 必须允许目标前端域名和必要响应头，否则 Canvas 导出会失败。
+- 编辑器使用后端鉴权资源接口返回的原始图片 URL。
+- 图片原始对象存放在私有 MinIO bucket；浏览器不直接持有 MinIO 凭据或对象键。编辑器所需 CORS 和 Canvas 响应头由应用资源层统一配置。
+- MinIO 是业务图片的唯一持久化实现；不得新增 COS 或其他并行存储。上传、URL 导入、AI 结果和编辑器导出均由后端写入 MinIO，前端只使用后端鉴权资源 URL。
 
 ### 6.6 性能目标
 
@@ -610,13 +611,13 @@ production
 ```bash
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8123/api/v1
 NEXT_PUBLIC_WS_BASE_URL=ws://localhost:8123
-NEXT_PUBLIC_ASSET_BASE_URL=https://example-cos-host
+NEXT_PUBLIC_ASSET_BASE_URL=http://localhost:8123/api/v1
 NEXT_PUBLIC_APP_ENV=development
 ```
 
-所有 `NEXT_PUBLIC_` 变量都会暴露给浏览器，不得存放 COS 密钥、模型密钥、会话密钥或服务端 Token。服务端私有环境变量不得使用 `NEXT_PUBLIC_` 前缀。
+所有 `NEXT_PUBLIC_` 变量都会暴露给浏览器，不得存放 MinIO 密钥、模型密钥、会话密钥或服务端 Token。服务端私有环境变量不得使用 `NEXT_PUBLIC_` 前缀。
 
-本地开发已使用 Docker Compose 管理 MySQL 和 Redis，后端与前端仍在宿主机运行。Nginx、应用容器化、CI/CD 和正式生产部署在部署阶段再讨论；以 `docker/README.md` 为当前本地运行说明。
+本地开发已使用同一个 `teacup-picture` Docker Compose 项目管理 MySQL、Redis 和 MinIO，后端与前端仍在宿主机运行。Nginx、应用容器化、CI/CD 和正式生产部署在部署阶段再讨论；以 `docker/README.md` 为当前本地运行说明。
 
 后端数据库引入 Flyway 管理版本。开发、测试和 Docker 环境执行同一套迁移脚本，禁止只修改本地数据库而不提交迁移。
 
@@ -785,7 +786,7 @@ M1 `/api/v1` 闭环已经实现。团队空间事务、AI 任务、版本、评�
 
 ### 12.3 安全上线边界
 
-安全问题的当前完成状态和公网部署阻断项只在 `docs/backend-gap-analysis.md` 维护，避免在 PRD 中复制后过期。原则上密码哈希、CSRF、限流、SSRF、上传内容校验、WebSocket Origin、COS 和分享访问控制必须在对应能力公网开放前通过专项验收。本地 Docker 可运行不等于已满足公网安全要求。
+安全问题的当前完成状态和公网部署阻断项只在 `docs/backend-gap-analysis.md` 维护，避免在 PRD 中复制后过期。原则上密码哈希、CSRF、限流、SSRF、上传内容校验、WebSocket Origin、MinIO 和分享访问控制必须在对应能力公网开放前通过专项验收。本地 Docker 可运行不等于已满足公网安全要求。
 
 ## 13. 分阶段路线图
 

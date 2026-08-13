@@ -11,7 +11,7 @@
 | UI v1.1 | 已落地到当前 M1 页面 | `docs/ui-design/README.md` |
 | M2～M7 | 规划中，禁止用假数据提前实现 | `docs/product-prd.md` 路线图 |
 
-完整文档导航与优先级见 [`docs/README.md`](docs/README.md)。后端已知缺口见 [`docs/backend-gap-analysis.md`](docs/backend-gap-analysis.md)。
+完整文档导航与优先级见 [`docs/README.md`](docs/README.md)。后端已知缺口见 [`docs/backend-gap-analysis.md`](docs/backend-gap-analysis.md)。图片统一存储规范见 [`docs/picture-storage.md`](docs/picture-storage.md)：业务图片只能存入私有 MinIO，禁止恢复 COS 或新增其他并行存储。
 
 ## 目录
 
@@ -19,12 +19,12 @@
 backend/   Spring Boot 后端
 frontend/  Next.js 前端
 docs/      产品、接口、缺口与 UI 设计文档
-docker/    本地 MySQL 与 Redis 配置
+docker/    本地 MySQL、Redis 与 MinIO 配置
 ```
 
 ## 本地运行
 
-要求 Java 17、Maven 3.8+、Node.js 20+、pnpm，以及可用的 MySQL、Redis 和对象存储配置。环境变量示例分别见 `backend/src/main/resources/application.yml`、`frontend/.env.example` 和 `docker/.env.example`。
+要求 Java 17、Maven 3.8+、Node.js 20+、pnpm，以及 `teacup-picture` Docker Compose 中可用的 MySQL、Redis 和 MinIO。环境变量示例分别见 `backend/src/main/resources/application.yml`、`frontend/.env.example` 和 `docker/.env.example`。
 
 ```powershell
 # 后端

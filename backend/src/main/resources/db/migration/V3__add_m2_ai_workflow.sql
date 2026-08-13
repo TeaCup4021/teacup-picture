@@ -1,0 +1,75 @@
+CREATE TABLE `ai_model` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `code` VARCHAR(64) NOT NULL,
+    `displayName` VARCHAR(128) NOT NULL,
+    `provider` VARCHAR(32) NOT NULL,
+    `providerModel` VARCHAR(128) NOT NULL,
+    `capabilities` VARCHAR(256) NOT NULL,
+    `supportedRatios` VARCHAR(256) NOT NULL,
+    `supportedQualities` VARCHAR(128) NOT NULL,
+    `supportsReference` TINYINT NOT NULL DEFAULT 0,
+    `quotaCost` INT NOT NULL DEFAULT 1,
+    `enabled` TINYINT NOT NULL DEFAULT 1,
+    `createTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updateTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_ai_model_code` (`code`),
+    KEY `idx_ai_model_enabled` (`enabled`, `id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE `ai_quota_usage` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `userId` BIGINT NOT NULL,
+    `usageDate` DATE NOT NULL,
+    `taskType` VARCHAR(32) NOT NULL,
+    `usedCount` INT NOT NULL DEFAULT 0,
+    `createTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updateTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_ai_quota_user_date_type` (`userId`, `usageDate`, `taskType`),
+    CONSTRAINT `fk_ai_quota_user` FOREIGN KEY (`userId`) REFERENCES `user` (`id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE `ai_task` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `userId` BIGINT NOT NULL,
+    `taskType` VARCHAR(32) NOT NULL,
+    `modelId` BIGINT NOT NULL,
+    `modelCode` VARCHAR(64) NOT NULL,
+    `provider` VARCHAR(32) NOT NULL,
+    `providerModel` VARCHAR(128) NOT NULL,
+    `prompt` VARCHAR(2000) NOT NULL,
+    `ratio` VARCHAR(16) NOT NULL,
+    `quality` VARCHAR(32) NOT NULL,
+    `sourcePictureId` BIGINT NULL,
+    `referencePictureId` BIGINT NULL,
+    `status` VARCHAR(32) NOT NULL,
+    `providerTaskId` VARCHAR(256) NULL,
+    `providerRequestId` VARCHAR(256) NULL,
+    `resultPictureId` BIGINT NULL,
+    `failureCode` VARCHAR(64) NULL,
+    `failureReason` VARCHAR(500) NULL,
+    `quotaCost` INT NOT NULL,
+    `quotaRefunded` TINYINT NOT NULL DEFAULT 0,
+    `invocationStarted` TINYINT NOT NULL DEFAULT 0,
+    `createTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `startTime` DATETIME NULL,
+    `finishTime` DATETIME NULL,
+    `updateTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_ai_task_user_created` (`userId`, `createTime`, `id`),
+    KEY `idx_ai_task_status_updated` (`status`, `updateTime`, `id`),
+    KEY `idx_ai_task_provider_task` (`provider`, `providerTaskId`),
+    CONSTRAINT `fk_ai_task_user` FOREIGN KEY (`userId`) REFERENCES `user` (`id`),
+    CONSTRAINT `fk_ai_task_model` FOREIGN KEY (`modelId`) REFERENCES `ai_model` (`id`),
+    CONSTRAINT `fk_ai_task_source_picture` FOREIGN KEY (`sourcePictureId`) REFERENCES `picture` (`id`),
+    CONSTRAINT `fk_ai_task_reference_picture` FOREIGN KEY (`referencePictureId`) REFERENCES `picture` (`id`),
+    CONSTRAINT `fk_ai_task_result_picture` FOREIGN KEY (`resultPictureId`) REFERENCES `picture` (`id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+INSERT INTO `ai_model` (`code`, `displayName`, `provider`, `providerModel`, `capabilities`,
+                        `supportedRatios`, `supportedQualities`, `supportsReference`, `quotaCost`, `enabled`)
+VALUES ('wanx-create', '万相创作', 'aliyun', 'wanx2.1-t2i-turbo', '["generate"]',
+        '["1:1","4:3","3:4","16:9","9:16"]', '["standard","hd"]', 0, 1, 1),
+       ('qwen-outpaint', '通义扩图', 'aliyun', 'qwen-image-max', '["outpaint"]',
+        '["1:1","4:3","3:4","16:9","9:16"]', '["standard","hd"]', 1, 1, 1);

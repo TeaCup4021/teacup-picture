@@ -31,6 +31,16 @@ public class Picture {
      */
     private String thumbnailUrl;
 
+    private String storageProvider;
+
+    private String objectKey;
+
+    private String thumbnailObjectKey;
+
+    private String contentType;
+
+    private String checksum;
+
     /**
      * 图片名称
      */
