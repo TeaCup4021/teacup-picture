@@ -4,7 +4,7 @@
 >
 > 更新日期：2026-08-13
 >
-> 状态：M1 已实现；M2～M7 为规划设计
+> 状态：M1、M2 已实现开发闭环；M3～M7 为规划设计
 >
 > 视觉方向：飞书式协作效率 + 图片内容发现，不复制任何品牌界面
 
@@ -42,7 +42,7 @@
 | `/upload`                           | [上传图片](pages/upload.md)                        | M1     | 已实现   | [upload.png](references/upload.png)                                                |
 | `/admin/reviews`                    | [管理员审核](pages/admin-reviews.md)               | M1     | 已实现   | [admin-reviews.png](references/admin-reviews.png)                                  |
 | `/login`、`/register`               | [账号与会话](pages/account.md)                     | M1     | 已实现   | 产品图待补                                                                         |
-| `/ai/create`、`/ai/tasks`           | [AI 创作与任务](pages/ai.md)                       | M2     | 规划     | [ai-create.png](references/ai-create.png)、[ai-tasks.png](references/ai-tasks.png) |
+| `/ai/create`、`/ai/tasks`           | [AI 创作与任务](pages/ai.md)                       | M2     | 已实现开发闭环 | [ai-create.png](references/ai-create.png)、[ai-tasks.png](references/ai-tasks.png) |
 | `/editor/[pictureId]`               | [图片编辑器](pages/editor.md)                      | M3/M5  | 规划     | [editor.png](references/editor.png)                                                |
 | `/spaces/team`、`/spaces/[spaceId]` | [团队空间](pages/team-space.md)                    | M4/M5  | 规划     | [team-space.png](references/team-space.png)                                        |
 | `/notifications`、分享与评论        | [通知、分享与评论](pages/notifications-sharing.md) | M4/M6  | 规划     | 产品图待补                                                                         |

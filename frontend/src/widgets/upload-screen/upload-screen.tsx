@@ -5,7 +5,7 @@ import { Alert, App, Button, Form, Input, Result, Segmented, Select, Skeleton, U
 import type { UploadProps } from "antd";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { usePrototypeSession, usePrototypeUpload } from "@/features/prototype";
+import { m1Api, usePrototypeSession, usePrototypeUpload } from "@/features/prototype";
 import { PictureImage } from "@/features/prototype/ui/picture-image";
 
 interface UploadFormValues {
@@ -37,6 +37,23 @@ function readPicture(file: File): Promise<PreviewState> {
   });
 }
 
+export function normalizePictureUrl(value: string): string {
+  let normalized = value.trim().replace(/[，。；、]+$/u, "");
+  const marker = /https?:\/\//gi;
+  marker.exec(normalized);
+  let nextMarker = marker.exec(normalized);
+  while (nextMarker?.index !== undefined) {
+    const first = normalized.slice(0, nextMarker.index);
+    const remainder = normalized.slice(nextMarker.index);
+    if (first === remainder) {
+      normalized = first;
+      break;
+    }
+    nextMarker = marker.exec(normalized);
+  }
+  return normalized;
+}
+
 export function UploadScreen() {
   const { message } = App.useApp();
   const [form] = Form.useForm<UploadFormValues>();
@@ -44,6 +61,7 @@ export function UploadScreen() {
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [urlPreviewLoading, setUrlPreviewLoading] = useState(false);
   const session = usePrototypeSession();
   const upload = usePrototypeUpload();
   const router = useRouter();
@@ -78,14 +96,23 @@ export function UploadScreen() {
     setFileError(null);
   };
 
-  const handleUrlPreview = () => {
-    const url = form.getFieldValue("url")?.trim();
+  const handleUrlPreview = async () => {
+    const url = normalizePictureUrl(form.getFieldValue("url") ?? "");
     if (!url) {
       setFileError("请输入图片 URL");
       return;
     }
     setFileError(null);
-    setPreview({ src: url, width: 1200, height: 900 });
+    setUrlPreviewLoading(true);
+    try {
+      form.setFieldValue("url", url);
+      setPreview(await m1Api.previewPictureUrl(url));
+    } catch (error) {
+      setPreview(null);
+      setFileError(error instanceof Error ? error.message : "图片 URL 无法预览");
+    } finally {
+      setUrlPreviewLoading(false);
+    }
   };
 
   const handleSubmit = (values: UploadFormValues) => {
@@ -98,7 +125,7 @@ export function UploadScreen() {
         title: values.title,
         description: values.description?.trim() || "暂无描述",
         file: mode === "local" ? selectedFile ?? undefined : undefined,
-        imageUrl: mode === "url" ? values.url?.trim() : undefined,
+        imageUrl: mode === "url" ? normalizePictureUrl(values.url ?? "") : undefined,
         category: values.category,
         tags: values.tags
           ? values.tags
@@ -189,6 +216,7 @@ export function UploadScreen() {
                     enterButton="预览"
                     placeholder="https://example.com/picture.jpg"
                     onSearch={handleUrlPreview}
+                    loading={urlPreviewLoading}
                   />
                 </Form.Item>
               )}
@@ -240,7 +268,12 @@ export function UploadScreen() {
         <aside className="upload-preview" aria-label="图片预览">
           {preview ? (
             <div style={{ aspectRatio: `${preview.width} / ${preview.height}` }}>
-              <PictureImage alt="待上传图片预览" src={preview.src} />
+              <PictureImage
+                alt="待上传图片预览"
+                fallbackSrc=""
+                onError={() => setFileError("预览图片加载失败，请检查 URL 是否仍然可访问")}
+                src={preview.src}
+              />
             </div>
           ) : (
             <div className="preview-placeholder">

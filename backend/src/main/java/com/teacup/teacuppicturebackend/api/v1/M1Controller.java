@@ -8,6 +8,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -75,6 +76,31 @@ public class M1Controller {
                                                                       HttpServletRequest request) {
         User user = service.requireUser(request);
         return response(HttpStatus.CREATED, service.importUrl(user, body), request);
+    }
+
+    @PostMapping(value = "/pictures/url-imports", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+    public ResponseEntity<V1Response<M1Dtos.PictureDetail>> importUrlForm(
+            @RequestParam String url,
+            @RequestParam(required = false) String spaceId,
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) String introduction,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) List<String> tags,
+            HttpServletRequest request) {
+        User user = service.requireUser(request);
+        M1Dtos.UrlImportRequest body = new M1Dtos.UrlImportRequest(url, spaceId, name, introduction, category, tags);
+        return response(HttpStatus.CREATED, service.importUrl(user, body), request);
+    }
+
+    @GetMapping("/pictures/url-preview")
+    public ResponseEntity<Resource> previewUrl(@RequestParam String url, HttpServletRequest request) {
+        PictureStorage.StoredObject object = service.previewUrl(service.requireUser(request), url);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .header("X-Content-Type-Options", "nosniff")
+                .contentLength(object.size())
+                .contentType(org.springframework.http.MediaType.parseMediaType(object.contentType()))
+                .body(object.resource());
     }
 
     @GetMapping("/pictures")

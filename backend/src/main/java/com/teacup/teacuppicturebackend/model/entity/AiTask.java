@@ -13,6 +13,7 @@ public class AiTask {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long userId;
+    private String idempotencyKey;
     private String taskType;
     private Long modelId;
     private String modelCode;
@@ -21,6 +22,9 @@ public class AiTask {
     private String prompt;
     private String ratio;
     private String quality;
+    private String background;
+    private String outputFormat;
+    private Integer outputCompression;
     private Long sourcePictureId;
     private Long referencePictureId;
     private String status;
@@ -31,6 +35,7 @@ public class AiTask {
     private String failureReason;
     private Integer quotaCost;
     private Integer quotaRefunded;
+    private Integer quotaSettled;
     private Integer invocationStarted;
     private LocalDateTime createTime;
     private LocalDateTime startTime;

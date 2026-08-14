@@ -10,9 +10,6 @@ import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapp
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.teacup.teacuppicturebackend.annotation.AuthCheck;
-import com.teacup.teacuppicturebackend.api.aliyunai.AliYunAiApi;
-import com.teacup.teacuppicturebackend.api.aliyunai.model.CreateOutPaintingTaskResponse;
-import com.teacup.teacuppicturebackend.api.aliyunai.model.GetOutPaintingTaskResponse;
 import com.teacup.teacuppicturebackend.auth.StpInterfaceImpl;
 import com.teacup.teacuppicturebackend.auth.StpKit;
 import com.teacup.teacuppicturebackend.auth.annotation.SaSpaceCheckPermission;
@@ -75,9 +72,6 @@ public class PictureController {
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
-
-    @Resource
-    private AliYunAiApi aliYunAiApi;
 
     @Resource(name = "pictureLocalCache")
     private Cache<String, String> localCache;
@@ -459,34 +453,4 @@ public class PictureController {
     }
 
 
-    /**
-     * 创建扩图任务
-     * @param createPictureOutPaintingTaskRequest
-     * @param request
-     * @return
-     */
-    @PostMapping("/out_painting/create_task")
-    public BaseResponse<CreateOutPaintingTaskResponse> createPictureOutPaintingTask(
-            @RequestBody CreatePictureOutPaintingTaskRequest createPictureOutPaintingTaskRequest,
-            HttpServletRequest request) {
-        if (createPictureOutPaintingTaskRequest == null || createPictureOutPaintingTaskRequest.getPictureId() == null) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR);
-        }
-        User loginUser = userService.getLoginUser(request);
-        CreateOutPaintingTaskResponse response = pictureService.createPictureOutPaintingTask(createPictureOutPaintingTaskRequest, loginUser);
-        return ResultUtils.success(response);
-    }
-
-
-    /**
-     * 查询任务接口
-     * @param taskId
-     * @return
-     */
-    @GetMapping("/out_painting/get_task")
-    public BaseResponse<GetOutPaintingTaskResponse> getPictureOutPaintingTask(String taskId) {
-        ThrowUtils.throwIf(StrUtil.isBlank(taskId), ErrorCode.PARAMS_ERROR);
-        GetOutPaintingTaskResponse task = aliYunAiApi.getOutPaintingTask(taskId);
-        return ResultUtils.success(task);
-    }
 }

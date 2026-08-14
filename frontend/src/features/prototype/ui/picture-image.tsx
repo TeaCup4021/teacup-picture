@@ -8,10 +8,14 @@ interface PictureImageProps {
   className?: string;
   priority?: boolean;
   src: string;
+  /** Optional visual fallback for existing gallery cards. Empty string disables fallback. */
+  fallbackSrc?: string;
+  onError?: () => void;
 }
 
-export function PictureImage({ alt, className, priority, src }: PictureImageProps) {
-  const [resolvedSource, setResolvedSource] = useState(src);
+export function PictureImage({ alt, className, fallbackSrc = "/mock-images/gallery-08.jpg", onError, priority, src }: PictureImageProps) {
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const resolvedSource = failedSource === src && fallbackSrc ? fallbackSrc : src;
 
   return (
     <Image
@@ -26,7 +30,10 @@ export function PictureImage({ alt, className, priority, src }: PictureImageProp
         resolvedSource.startsWith("data:") ||
         resolvedSource.startsWith("http")
       }
-      onError={() => setResolvedSource("/mock-images/gallery-08.jpg")}
+      onError={() => {
+        onError?.();
+        if (fallbackSrc) setFailedSource(src);
+      }}
     />
   );
 }

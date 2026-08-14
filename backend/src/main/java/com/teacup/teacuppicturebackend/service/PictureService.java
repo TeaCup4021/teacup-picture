@@ -3,7 +3,6 @@ package com.teacup.teacuppicturebackend.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.teacup.teacuppicturebackend.api.aliyunai.model.CreateOutPaintingTaskResponse;
 import com.teacup.teacuppicturebackend.common.BaseResponse;
 import com.teacup.teacuppicturebackend.common.DeleteRequest;
 import com.teacup.teacuppicturebackend.model.dto.picture.*;
@@ -73,5 +72,4 @@ public interface PictureService extends IService<Picture> {
     @Transactional(rollbackFor = Exception.class)
     void batchEditPictureMetadata(PictureEditByBatchRequest request, Long spaceId, Long loginUserId);
 
-    CreateOutPaintingTaskResponse createPictureOutPaintingTask(CreatePictureOutPaintingTaskRequest createPictureOutPaintingTaskRequest, User loginUser);
 }

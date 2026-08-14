@@ -17,6 +17,7 @@ public class AiQuotaUsage {
     private LocalDate usageDate;
     private String taskType;
     private Integer usedCount;
+    private Integer reservedCount;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }

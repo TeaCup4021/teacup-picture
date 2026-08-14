@@ -19,6 +19,9 @@ public class AiModel {
     private String capabilities;
     private String supportedRatios;
     private String supportedQualities;
+    private String supportedBackgrounds;
+    private String supportedOutputFormats;
+    private Integer supportsOutputCompression;
     private Integer supportsReference;
     private Integer quotaCost;
     private Integer enabled;

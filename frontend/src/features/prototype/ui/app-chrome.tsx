@@ -2,6 +2,7 @@
 
 import {
   AppstoreOutlined,
+  BgColorsOutlined,
   AuditOutlined,
   DownOutlined,
   HomeOutlined,
@@ -24,6 +25,8 @@ const publicNavigation = [
 const workspaceNavigation = [
   { href: "/spaces/personal", label: "空间概览", icon: <HomeOutlined /> },
   { href: "/upload", label: "上传图片", icon: <UploadOutlined /> },
+  { href: "/ai/create", label: "AI 创作", icon: <BgColorsOutlined /> },
+  { href: "/ai/tasks", label: "任务中心", icon: <AuditOutlined /> },
   { href: "/", label: "公开图库", icon: <PictureOutlined /> },
 ];
 
@@ -34,7 +37,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
   const logout = usePrototypeLogout();
   if (pathname === "/login" || pathname === "/register") return children;
 
-  const isWorkspace = pathname.startsWith("/spaces/") || pathname === "/upload";
+  const isWorkspace = pathname.startsWith("/spaces/") || pathname === "/upload" || pathname.startsWith("/ai/");
   const isAdmin = pathname.startsWith("/admin/");
 
   const menuItems: MenuProps["items"] = [
@@ -119,7 +122,11 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
                 ? "管理后台 / 图片公开审核"
                 : pathname === "/upload"
                   ? "个人空间 / 上传图片"
-                  : "个人空间 / 空间概览"}
+                  : pathname === "/ai/create"
+                    ? "AI 创作 / 创建任务"
+                    : pathname === "/ai/tasks"
+                      ? "AI 创作 / 任务中心"
+                      : "个人空间 / 空间概览"}
             </span>
           </header>
           <div className="workspace-page">{children}</div>

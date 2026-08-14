@@ -9,9 +9,6 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.teacup.teacuppicturebackend.api.aliyunai.AliYunAiApi;
-import com.teacup.teacuppicturebackend.api.aliyunai.model.CreateOutPaintingTaskRequest;
-import com.teacup.teacuppicturebackend.api.aliyunai.model.CreateOutPaintingTaskResponse;
 import com.teacup.teacuppicturebackend.exception.BusinessException;
 import com.teacup.teacuppicturebackend.exception.ErrorCode;
 import com.teacup.teacuppicturebackend.exception.ThrowUtils;
@@ -83,9 +80,6 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private ThreadPoolExecutor customExecutor;
-
-    @Resource
-    private AliYunAiApi aliYunAiApi;
 
     @Resource
     private  PictureCacheClearObserver pictureCacheClearObserver;
@@ -783,37 +777,6 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      * }
      */
 
-
-    /**
-     * 创建扩图任务
-     * @param createPictureOutPaintingTaskRequest
-     * @param loginUser
-     * @return
-     */
-    @Override
-    public CreateOutPaintingTaskResponse createPictureOutPaintingTask(CreatePictureOutPaintingTaskRequest createPictureOutPaintingTaskRequest, User loginUser) {
-
-        // 获取图片ID
-        Long pictureId = createPictureOutPaintingTaskRequest.getPictureId();
-        // 根据图片ID查询图片信息，如果不存在则抛出业务异常
-        Picture picture = Optional.ofNullable(this.getById(pictureId))
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_ERROR));
-
-        // 检查用户对图片的访问权限
-        checkPictureAuth(loginUser, picture);
-
-        // 构建创建外绘任务的请求参数
-        CreateOutPaintingTaskRequest taskRequest = new CreateOutPaintingTaskRequest();
-        CreateOutPaintingTaskRequest.Input input = new CreateOutPaintingTaskRequest.Input();
-        input.setImageUrl(picture.getUrl());
-        taskRequest.setInput(input);
-        // 复制请求参数属性
-        BeanUtil.copyProperties(createPictureOutPaintingTaskRequest, taskRequest);
-
-        // 调用阿里云AI接口创建外绘任务并返回结果
-        return aliYunAiApi.createOutPaintingTask(taskRequest);
-
-    }
 
 }
 

@@ -8,6 +8,11 @@ public class AiProviderException extends RuntimeException {
         this.code = code;
     }
 
+    public AiProviderException(String code, String message, Throwable cause) {
+        super(message, cause);
+        this.code = code;
+    }
+
     public String getCode() {
         return code;
     }

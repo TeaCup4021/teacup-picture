@@ -9,6 +9,8 @@ public interface PictureStorage {
 
     StoredPicture importUrl(String url, long spaceId);
 
+    StoredObject previewUrl(String url);
+
     StoredPicture store(InputStream input, String fileName, String contentType, long spaceId);
 
     StoredObject load(String objectKey);

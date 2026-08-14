@@ -46,9 +46,13 @@ $env:MINIO_ENDPOINT='http://127.0.0.1:19000'
 $env:MINIO_APP_ACCESS_KEY='<MINIO_APP_ACCESS_KEY from docker/.env>'
 $env:MINIO_APP_SECRET_KEY='<MINIO_APP_SECRET_KEY from docker/.env>'
 $env:MINIO_BUCKET='teacup-pictures'
+$env:OPENAI_API_BASE_URL='https://claudenb.com'
+$env:OPENAI_API_KEY='<key whose group exposes gpt-image-2>'
 Set-Location backend
 mvn spring-boot:run
 ```
+
+The local Spring profile also imports `docker/.env` as a Java properties file. Values in that file must not be wrapped in quotes. The configured API key and base URL must belong to the same OpenAI-compatible service, and the key's group must expose the image model configured by the backend.
 
 Flyway is the only schema manager. MySQL initialization creates the database and application account, while the backend applies versioned migrations when it starts. `minio-init` creates a private picture bucket and a bucket-scoped application account. It is expected to exit successfully after initialization.
 

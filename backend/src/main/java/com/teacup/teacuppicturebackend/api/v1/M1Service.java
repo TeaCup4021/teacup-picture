@@ -129,12 +129,28 @@ public class M1Service {
         return savePictureWithCompensation(user, space, stored, request.name(), request.introduction(), request.category(), request.tags());
     }
 
+    public PictureStorage.StoredObject previewUrl(User user, String url) {
+        if (url == null || url.isBlank()) throw V1Exception.badRequest("图片 URL 不能为空");
+        return storage.previewUrl(url.trim());
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public Picture saveGeneratedPicture(User user, PictureStorage.StoredPicture stored, String name,
                                         String introduction, List<String> tags) {
         Space space = personalSpaceService.getOrCreatePersonalSpace(user.getId());
         M1Dtos.PictureDetail detail = savePictureWithCompensation(user, space, stored, name, introduction, "AI 创作", tags);
         return requirePicture(Long.parseLong(detail.id()));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void discardGeneratedPicture(Picture picture) {
+        if (picture == null || picture.getId() == null) return;
+        pictureMapper.deleteById(picture.getId());
+        spaceService.lambdaUpdate().eq(Space::getId, picture.getSpaceId())
+                .setSql("totalSize = GREATEST(0, totalSize - " + nz(picture.getPicSize()) + ")")
+                .setSql("totalCount = GREATEST(0, totalCount - 1)").update();
+        storage.delete(picture.getObjectKey());
+        storage.delete(picture.getThumbnailObjectKey());
     }
 
     public M1Dtos.PicturePage listPictures(User user, int page, int pageSize, String spaceId) {

@@ -1,0 +1,223 @@
+openapi: 3.1.0
+info:
+  title: Teacup Picture M2 AI API
+  version: 1.0.0
+  description: >-
+    M2 contract for server-owned AI model capabilities, daily quotas, idempotent
+    asynchronous image-generation tasks, authenticated result downloads,
+    and administrator model configuration.
+servers:
+  - url: http://localhost:8123/api/v1
+    description: Local backend
+tags:
+  - name: AI
+  - name: AI administration
+paths:
+  /ai/models:
+    get:
+      tags: [AI]
+      operationId: listAiModels
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: Enabled model capabilities, content: { application/json: { schema: { $ref: '#/components/schemas/AiModelsResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /ai/quotas/me:
+    get:
+      tags: [AI]
+      operationId: getMyAiQuotas
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: Asia/Shanghai daily quota summary, content: { application/json: { schema: { $ref: '#/components/schemas/AiQuotaResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /ai/tasks:
+    post:
+      tags: [AI]
+      operationId: createAiTask
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateAiTaskRequest' } } }
+      responses:
+        '201': { description: New queued task, content: { application/json: { schema: { $ref: '#/components/schemas/AiTaskResponse' } } } }
+        '200': { description: Existing task returned for an idempotent retry, content: { application/json: { schema: { $ref: '#/components/schemas/AiTaskResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [AI]
+      operationId: listAiTasks
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: pageSize, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { in: query, name: status, schema: { $ref: '#/components/schemas/AiTaskStatus' } }
+      responses:
+        '200': { description: Task history, content: { application/json: { schema: { $ref: '#/components/schemas/AiTaskPageResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /ai/tasks/{taskId}:
+    get:
+      tags: [AI]
+      operationId: getAiTask
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/TaskId' }]
+      responses:
+        '200': { description: Task detail, content: { application/json: { schema: { $ref: '#/components/schemas/AiTaskResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /ai/tasks/{taskId}/cancel:
+    post:
+      tags: [AI]
+      operationId: cancelAiTask
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/TaskId' }]
+      responses:
+        '200': { description: Cancelled task, content: { application/json: { schema: { $ref: '#/components/schemas/AiTaskResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /ai/tasks/{taskId}/download:
+    get:
+      tags: [AI]
+      operationId: downloadAiResult
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/TaskId' }]
+      responses:
+        '200': { description: Authenticated image download, content: { image/*: { schema: { type: string, format: binary } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /admin/ai/models/{modelId}:
+    patch:
+      tags: [AI administration]
+      operationId: updateAiModel
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ModelId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateAiModelRequest' } } } }
+      responses:
+        '200': { description: Updated model, content: { application/json: { schema: { $ref: '#/components/schemas/AiModelResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    cookieAuth: { type: apiKey, in: cookie, name: TEACUP_SESSION }
+  parameters:
+    TaskId: { in: path, name: taskId, required: true, schema: { $ref: '#/components/schemas/Id' } }
+    ModelId: { in: path, name: modelId, required: true, schema: { $ref: '#/components/schemas/Id' } }
+  schemas:
+    Id: { type: string, pattern: '^[1-9][0-9]*$' }
+    AiTaskType: { type: string, enum: [generate, outpaint] }
+    AiTaskStatus: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+    AiModel:
+      type: object
+      required: [id, code, name, capabilities, ratios, qualities, backgrounds, outputFormats, supportsOutputCompression, supportsReference, quotaCost, enabled]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        code: { type: string }
+        name: { type: string }
+        capabilities: { type: array, items: { $ref: '#/components/schemas/AiTaskType' } }
+        ratios: { type: array, items: { type: string } }
+        qualities: { type: array, items: { type: string } }
+        backgrounds: { type: array, items: { type: string, enum: [auto, opaque, transparent] } }
+        outputFormats: { type: array, items: { type: string, enum: [png, jpeg, webp] } }
+        supportsOutputCompression: { type: boolean }
+        supportsReference: { type: boolean }
+        quotaCost: { type: integer, minimum: 1 }
+        enabled: { type: boolean }
+    AiQuota:
+      type: object
+      required: [taskType, dailyLimit, used, reserved, remaining]
+      properties:
+        taskType: { $ref: '#/components/schemas/AiTaskType' }
+        dailyLimit: { type: integer, minimum: 0 }
+        used: { type: integer, minimum: 0 }
+        reserved: { type: integer, minimum: 0 }
+        remaining: { type: integer, minimum: 0 }
+    AiQuotaSummary:
+      type: object
+      required: [date, quotas]
+      properties: { date: { type: string, format: date }, quotas: { type: array, items: { $ref: '#/components/schemas/AiQuota' } } }
+    AiPictureRef:
+      type: object
+      required: [id, name, thumbnailUrl]
+      properties: { id: { $ref: '#/components/schemas/Id' }, name: { type: string }, thumbnailUrl: { type: string, format: uri }, url: { type: [string, 'null'], format: uri } }
+    CreateAiTaskRequest:
+      type: object
+      required: [type, modelCode, prompt, ratio, quality]
+      properties:
+        type: { $ref: '#/components/schemas/AiTaskType' }
+        modelCode: { type: string }
+        prompt: { type: string, minLength: 1, maxLength: 2000 }
+        ratio: { type: string }
+        quality: { type: string }
+        background: { type: string, enum: [auto, opaque, transparent], default: auto }
+        outputFormat: { type: string, enum: [png, jpeg, webp], default: png }
+        outputCompression: { type: [integer, 'null'], minimum: 0, maximum: 100 }
+        sourcePictureId: { type: [string, 'null'] }
+        referencePictureId: { type: [string, 'null'] }
+    AiTask:
+      type: object
+      required: [id, type, model, prompt, ratio, quality, background, outputFormat, status, quotaRefunded, quotaSettled, createdAt]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        type: { $ref: '#/components/schemas/AiTaskType' }
+        model: { $ref: '#/components/schemas/AiModel' }
+        prompt: { type: string }
+        ratio: { type: string }
+        quality: { type: string }
+        background: { type: string, enum: [auto, opaque, transparent] }
+        outputFormat: { type: string, enum: [png, jpeg, webp] }
+        outputCompression: { type: [integer, 'null'], minimum: 0, maximum: 100 }
+        status: { $ref: '#/components/schemas/AiTaskStatus' }
+        sourcePicture: { oneOf: [{ $ref: '#/components/schemas/AiPictureRef' }, { type: 'null' }] }
+        referencePicture: { oneOf: [{ $ref: '#/components/schemas/AiPictureRef' }, { type: 'null' }] }
+        resultPicture: { oneOf: [{ $ref: '#/components/schemas/AiPictureRef' }, { type: 'null' }] }
+        failureCode: { type: [string, 'null'] }
+        failureReason: { type: [string, 'null'] }
+        quotaRefunded: { type: boolean }
+        quotaSettled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, 'null'], format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+        downloadUrl: { type: [string, 'null'], format: uri-reference }
+    UpdateAiModelRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 128 }
+        capabilities: { type: array, items: { $ref: '#/components/schemas/AiTaskType' } }
+        ratios: { type: array, items: { type: string } }
+        qualities: { type: array, items: { type: string } }
+        backgrounds: { type: array, items: { type: string, enum: [auto, opaque, transparent] } }
+        outputFormats: { type: array, items: { type: string, enum: [png, jpeg, webp] } }
+        supportsOutputCompression: { type: boolean }
+        supportsReference: { type: boolean }
+        quotaCost: { type: integer, minimum: 1, maximum: 100 }
+        enabled: { type: boolean }
+    PageMeta:
+      type: object
+      required: [page, pageSize, total, totalPages]
+      properties: { page: { type: integer }, pageSize: { type: integer }, total: { type: integer }, totalPages: { type: integer } }
+    AiTaskPage: { type: object, required: [items, page], properties: { items: { type: array, items: { $ref: '#/components/schemas/AiTask' } }, page: { $ref: '#/components/schemas/PageMeta' } } }
+    Envelope:
+      type: object
+      required: [code, data, message, requestId]
+      properties: { code: { type: integer, const: 0 }, data: {}, message: { type: string }, requestId: { type: string } }
+    AiModelsResponse: { allOf: [{ $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/AiModel' } } } }] }
+    AiModelResponse: { allOf: [{ $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/AiModel' } } }] }
+    AiQuotaResponse: { allOf: [{ $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/AiQuotaSummary' } } }] }
+    AiTaskResponse: { allOf: [{ $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/AiTask' } } }] }
+    AiTaskPageResponse: { allOf: [{ $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/AiTaskPage' } } }] }
+  responses:
+    BadRequest: { description: Invalid parameters or Idempotency-Key, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+    Unauthorized: { description: Missing or expired Cookie session, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+    Forbidden: { description: Administrator role required, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+    NotFound: { description: Resource does not exist or is not visible, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+    Conflict: { description: Invalid state or exhausted quota, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }

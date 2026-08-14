@@ -13,6 +13,7 @@ import io.minio.StatObjectResponse;
 import io.minio.http.Method;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
@@ -58,7 +59,7 @@ public class MinioPictureStorage implements PictureStorage {
         Path temporary = temporaryFile();
         try (InputStream input = file.getInputStream()) {
             Files.copy(new LimitedInputStream(input, MAX_BYTES), temporary, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            return validateAndUpload(temporary, file.getOriginalFilename(), file.getContentType(), spaceId);
+            return validateAndUpload(temporary, file.getOriginalFilename(), spaceId);
         } catch (V1Exception exception) {
             throw exception;
         } catch (IOException exception) {
@@ -94,7 +95,7 @@ public class MinioPictureStorage implements PictureStorage {
             try (InputStream input = connection.getInputStream()) {
                 Files.copy(new LimitedInputStream(input, MAX_BYTES), temporary, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
-            return validateAndUpload(temporary, uri.getPath(), connection.getContentType(), spaceId);
+            return validateAndUpload(temporary, uri.getPath(), spaceId);
         } catch (V1Exception exception) {
             throw exception;
         } catch (IOException exception) {
@@ -106,11 +107,59 @@ public class MinioPictureStorage implements PictureStorage {
     }
 
     @Override
+    public StoredObject previewUrl(String value) {
+        URI uri;
+        try {
+            uri = URI.create(value);
+        } catch (RuntimeException exception) {
+            throw V1Exception.badRequest("图片 URL 无效");
+        }
+        if (!Set.of("http", "https").contains(uri.getScheme()) || uri.getHost() == null) {
+            throw V1Exception.badRequest("仅支持 HTTP 或 HTTPS 图片 URL");
+        }
+        rejectPrivateAddress(uri.getHost());
+        try {
+            HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(10000);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (TeacupPicture URL Preview)");
+            connection.setRequestProperty("Accept", "image/avif,image/webp,image/apng,image/jpeg,image/png,image/*,*/*;q=0.8");
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) throw V1Exception.badRequest("无法下载图片 URL");
+            if (connection.getContentLengthLong() > MAX_BYTES) throw tooLarge();
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            try (InputStream input = connection.getInputStream()) {
+                new LimitedInputStream(input, MAX_BYTES).transferTo(output);
+            }
+            byte[] bytes = output.toByteArray();
+            String contentType = previewContentType(connection.getContentType(), uri.getPath());
+            if (ImageIO.read(new ByteArrayInputStream(bytes)) == null) {
+                throw V1Exception.badRequest("图片 URL 返回的内容不是有效图片");
+            }
+            String extension = contentType.substring("image/".length());
+            return new StoredObject(new ByteArrayResource(bytes), bytes.length, contentType, "preview." + extension);
+        } catch (V1Exception exception) {
+            throw exception;
+        } catch (IOException exception) {
+            if ("image too large".equals(exception.getMessage())) throw tooLarge();
+            throw V1Exception.badRequest("无法下载图片 URL");
+        }
+    }
+
+    private static String previewContentType(String remoteType, String path) {
+        String type = remoteType == null ? "" : remoteType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+        if (Set.of("image/jpeg", "image/png", "image/webp").contains(type)) return type;
+        String format = formatFromFileName(path);
+        return "image/" + ("jpg".equals(format) ? "jpeg" : format);
+    }
+
+    @Override
     public StoredPicture store(InputStream input, String fileName, String contentType, long spaceId) {
         Path temporary = temporaryFile();
         try (InputStream source = input) {
             Files.copy(new LimitedInputStream(source, MAX_BYTES), temporary, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            return validateAndUpload(temporary, fileName, contentType, spaceId);
+            return validateAndUpload(temporary, fileName, spaceId);
         } catch (V1Exception exception) {
             throw exception;
         } catch (IOException exception) {
@@ -171,16 +220,14 @@ public class MinioPictureStorage implements PictureStorage {
         }
     }
 
-    private StoredPicture validateAndUpload(Path file, String fileName, String contentType, long spaceId) {
+    private StoredPicture validateAndUpload(Path file, String fileName, long spaceId) {
         String objectKey = null;
         String thumbnailObjectKey = null;
         try {
             long size = Files.size(file);
             if (size > MAX_BYTES) throw tooLarge();
             String format;
-            try (InputStream input = Files.newInputStream(file)) {
-                format = verifyFormat(input, fileName, contentType);
-            }
+            format = formatFromFileName(fileName);
             String normalizedFormat = "jpg".equals(format) ? "jpeg" : format;
             int[] dimensions;
             try (InputStream input = Files.newInputStream(file)) {
@@ -231,23 +278,10 @@ public class MinioPictureStorage implements PictureStorage {
         return output.toByteArray();
     }
 
-    private String verifyFormat(InputStream input, String fileName, String contentType) throws IOException {
-        byte[] header = input.readNBytes(32);
+    static String formatFromFileName(String fileName) {
         String extension = "";
         if (fileName != null && fileName.contains(".")) extension = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
-        if (!FORMATS.contains(extension)) {
-            if ("image/png".equalsIgnoreCase(contentType)) extension = "png";
-            else if ("image/webp".equalsIgnoreCase(contentType)) extension = "webp";
-            else if ("image/jpeg".equalsIgnoreCase(contentType)) extension = "jpeg";
-        }
         if (!FORMATS.contains(extension)) throw unsupported("仅支持 JPEG、PNG 和 WebP");
-        boolean jpeg = header.length >= 3 && (header[0] & 0xff) == 0xff && (header[1] & 0xff) == 0xd8 && (header[2] & 0xff) == 0xff;
-        boolean png = header.length >= 8 && header[0] == (byte) 0x89 && header[1] == 'P' && header[2] == 'N' && header[3] == 'G';
-        boolean webp = header.length >= 12 && ascii(header, 0, "RIFF") && ascii(header, 8, "WEBP");
-        if ((extension.equals("png") && !png) || (extension.equals("webp") && !webp)
-                || ((extension.equals("jpeg") || extension.equals("jpg")) && !jpeg)) {
-            throw unsupported("图片内容与格式不匹配");
-        }
         return extension;
     }
 
@@ -318,11 +352,6 @@ public class MinioPictureStorage implements PictureStorage {
     private static String fileName(String objectKey) { return objectKey.substring(objectKey.lastIndexOf('/') + 1); }
     private static V1Exception tooLarge() { return new V1Exception(HttpStatus.PAYLOAD_TOO_LARGE, 41300, "图片不能超过 20 MB"); }
     private static V1Exception unsupported(String message) { return new V1Exception(HttpStatus.UNSUPPORTED_MEDIA_TYPE, 41500, message); }
-    private static boolean ascii(byte[] bytes, int offset, String value) {
-        if (bytes.length < offset + value.length()) return false;
-        for (int i = 0; i < value.length(); i++) if (bytes[offset + i] != (byte) value.charAt(i)) return false;
-        return true;
-    }
     private static int le24(byte[] bytes, int offset) {
         return (bytes[offset] & 0xff) | ((bytes[offset + 1] & 0xff) << 8) | ((bytes[offset + 2] & 0xff) << 16);
     }

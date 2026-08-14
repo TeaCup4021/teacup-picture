@@ -52,7 +52,37 @@ async function post<T>(url: string, body?: unknown): Promise<T> {
   return unwrapApiResponse((await apiClient.post<ApiEnvelope<T>>(url, body)).data);
 }
 
+async function postForm<T>(url: string, fields: Record<string, string | string[] | undefined>): Promise<T> {
+  const body = new URLSearchParams();
+  for (const [key, value] of Object.entries(fields)) {
+    if (Array.isArray(value)) value.forEach((item) => body.append(key, item));
+    else if (value !== undefined) body.append(key, value);
+  }
+  return unwrapApiResponse((await apiClient.post<ApiEnvelope<T>>(url, body, {
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+  })).data);
+}
+
 export const m1Api = {
+  async previewPictureUrl(url: string): Promise<{ src: string; width: number; height: number }> {
+    const response = await apiClient.get<Blob>("/pictures/url-preview", {
+      params: { url },
+      responseType: "blob",
+    });
+    const src = URL.createObjectURL(response.data);
+    try {
+      const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+        const image = new window.Image();
+        image.onerror = () => reject(new Error("图片 URL 无法加载或不是可识别的图片"));
+        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+        image.src = src;
+      });
+      return { src, ...dimensions };
+    } catch (error) {
+      URL.revokeObjectURL(src);
+      throw error;
+    }
+  },
   async register(input: RegisterInput): Promise<{ userId: string; personalSpaceId: string }> {
     return post("/auth/register", input);
   },
@@ -88,9 +118,12 @@ export const m1Api = {
       input.tags.forEach((tag) => data.append("tags", tag));
       result = unwrapApiResponse((await apiClient.post<ApiEnvelope<ApiPicture>>("/pictures/uploads", data)).data);
     } else {
-      result = await post<ApiPicture>("/pictures/url-imports", {
-        url: input.imageUrl, name: input.title, introduction: input.description,
-        category: input.category, tags: input.tags,
+      result = await postForm<ApiPicture>("/pictures/url-imports", {
+        url: input.imageUrl,
+        name: input.title,
+        introduction: input.description,
+        category: input.category,
+        tags: input.tags,
       });
     }
     return picture(result);

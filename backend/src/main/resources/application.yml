@@ -32,8 +32,21 @@ spring:
     multipart:
       max-file-size: 20MB
       max-request-size: 22MB
+  profiles:
+    active: local
+
 
 teacup:
+  ai:
+    quota:
+      generate-daily: ${AI_GENERATE_DAILY_QUOTA:100}
+      outpaint-daily: ${AI_OUTPAINT_DAILY_QUOTA:100}
+      zone: ${AI_QUOTA_ZONE:Asia/Shanghai}
+    running-timeout-minutes: ${AI_RUNNING_TIMEOUT_MINUTES:15}
+    openai:
+      base-url: ${OPENAI_API_BASE_URL:https://claudenb.com}
+      api-key: ${OPENAI_API_KEY:}
+      timeout-ms: ${OPENAI_IMAGE_TIMEOUT_MS:120000}
   storage:
     endpoint: ${MINIO_ENDPOINT:http://127.0.0.1:19000}
     access-key: ${MINIO_APP_ACCESS_KEY:teacup-picture-app}
@@ -54,9 +67,6 @@ mybatis-plus:
       logic-delete-field: isDelete
       logic-delete-value: 1
       logic-not-delete-value: 0
-
-aliYunAi:
-  apiKey: ${ALIYUN_AI_API_KEY:}
 
 knife4j:
   enable: true
