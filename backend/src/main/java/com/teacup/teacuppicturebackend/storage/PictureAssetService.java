@@ -28,6 +28,10 @@ public class PictureAssetService {
         return baseUrl + "/pictures/" + pictureId + "/content?variant=" + normalizedVariant(variant);
     }
 
+    public String versionContentUrl(long pictureId, long versionId, String variant) {
+        return baseUrl + "/pictures/" + pictureId + "/versions/" + versionId + "/content?variant=" + normalizedVariant(variant);
+    }
+
     public String publicUrl(long pictureId, String variant) {
         return baseUrl + "/public/pictures/" + pictureId + "/content?variant=" + normalizedVariant(variant);
     }
@@ -69,3 +73,4 @@ public class PictureAssetService {
     }
 
 }
+

@@ -1,2 +1,3 @@
 allowBuilds:
+  canvas: false
   unrs-resolver: true

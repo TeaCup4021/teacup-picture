@@ -4,6 +4,7 @@ import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  EditOutlined,
   SendOutlined,
 } from "@ant-design/icons";
 import { Alert, App, Button, Descriptions, Result, Skeleton, Space, Tag } from "antd";
@@ -34,6 +35,7 @@ export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
 
   const item = picture.data;
   const isOwner = session.data?.id === item.authorId;
+  const canEdit = isOwner || session.data?.role === "admin";
   const canSubmit =
     isOwner && (item.publishStatus === "not_requested" || item.publishStatus === "rejected");
 
@@ -108,17 +110,31 @@ export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
           {item.publishStatus === "rejected" && isOwner ? (
             <Alert type="error" showIcon title="公开申请未通过" description={item.reviewNote} />
           ) : null}
-          {canSubmit ? (
-            <Button
-              block
-              size="large"
-              type="primary"
-              icon={<SendOutlined />}
-              loading={submitReview.isPending}
-              onClick={handleSubmitReview}
-            >
-              提交公开审核
-            </Button>
+          {canEdit || canSubmit ? (
+            <div className="detail-actions">
+              {canEdit ? (
+                <Button
+                  block
+                  size="large"
+                  type="primary"
+                  icon={<EditOutlined />}
+                  href={`/editor/${item.id}`}
+                >
+                  编辑图片
+                </Button>
+              ) : null}
+              {canSubmit ? (
+                <Button
+                  block
+                  size="large"
+                  icon={<SendOutlined />}
+                  loading={submitReview.isPending}
+                  onClick={handleSubmitReview}
+                >
+                  提交公开审核
+                </Button>
+              ) : null}
+            </div>
           ) : null}
         </aside>
       </div>

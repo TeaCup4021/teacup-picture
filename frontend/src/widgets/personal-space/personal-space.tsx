@@ -1,7 +1,7 @@
 "use client";
 
-import { CloudUploadOutlined, SendOutlined } from "@ant-design/icons";
-import { App, Button, Result, Segmented, Skeleton } from "antd";
+import { CloudUploadOutlined, EditOutlined, SendOutlined } from "@ant-design/icons";
+import { App, Button, Result, Segmented, Skeleton, Space } from "antd";
 import { useMemo, useState } from "react";
 import { usePersonalPictures, usePrototypeSession, useSubmitReview } from "@/features/prototype";
 import type { PublishStatus } from "@/features/prototype";
@@ -121,16 +121,25 @@ export function PersonalSpace() {
                 showStatus
                 variant="workspace"
                 action={
-                  canSubmit ? (
+                  <Space size={4}>
                     <Button
                       type="link"
-                      icon={<SendOutlined />}
-                      loading={submitReview.isPending && submitReview.variables === picture.id}
-                      onClick={() => handleSubmit(picture.id)}
+                      icon={<EditOutlined />}
+                      href={`/editor/${picture.id}`}
                     >
-                      提交审核
+                      编辑
                     </Button>
-                  ) : undefined
+                    {canSubmit ? (
+                      <Button
+                        type="link"
+                        icon={<SendOutlined />}
+                        loading={submitReview.isPending && submitReview.variables === picture.id}
+                        onClick={() => handleSubmit(picture.id)}
+                      >
+                        提交审核
+                      </Button>
+                    ) : null}
+                  </Space>
                 }
               />
             );

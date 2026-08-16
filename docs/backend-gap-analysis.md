@@ -1,6 +1,6 @@
 # 后端缺口分析
 
-更新日期：2026-08-13
+更新日期：2026-08-16
 
 本文以当前 `backend/` 实现和 `docs/product-prd.md` 为基线，记录前端接入前必须确认的后端事实、缺口和建议顺序。它不是已经实现的接口文档。
 
@@ -14,7 +14,8 @@
 | 完成 | M1 个人空间 | 新注册事务、幂等创建及本地/URL 上传的默认空间定位已完成；存量补偿另行处理 |
 | 完成 | M1 公开审核闭环 | 独立申请记录、管理员审核/撤回、匿名公开列表与详情已实现 |
 | 完成 | M2 AI 任务与配额 | 统一任务、模型能力、独立额度、幂等、取消、超时、结果入库和鉴权下载已实现；公网部署安全闸门仍未完成 |
-| P1 | 邀请、评论、分享、版本 | 数据表、实体、服务和接口均缺失 |
+| 完成 | M3-R 版本与单人编辑器 | EditorState v2、裁切、完整调节、统一预览/导出、草稿、不可变版本和前端生产验收已闭环 |
+| P1 | 邀请、评论、分享 | 数据表、实体、服务和接口均缺失 |
 | P1 | 协作持久化模型 | 只有进程内 WebSocket 广播和单编辑者锁，不具备恢复、排序或审计能力 |
 | P2 | 安全加固 | 除凭据清理外按本文安全闸门暂缓，但必须在公网部署前完成 |
 
@@ -28,6 +29,17 @@
 - `/api/v1` 已实现 OpenAPI 中的 M1 认证、个人空间、图片上传/URL 导入、个人图片、发布申请、管理员审核/撤回和匿名公开图库接口；统一 HTTP 状态、字符串 ID 和 `X-Request-Id`。
 - 前端已从 `localStorage` 原型数据切换到真实 API，新增注册页，并通过真实注册、Cookie 登录、上传、申请、管理员审核和匿名公开读取 Playwright E2E。
 - M1 之外尚未完成：存量用户个人空间补偿、团队空间事务修复，以及公网部署前安全加固。
+
+### M3-R 完成情况（2026-08-16）
+
+- `V10__add_m3_editor_versions.sql` 新增 `picture_draft` 和 `picture_version`；`V11__m3_editor_state_v2.sql` 将默认 schema 版本切换为 2；`V12__add_m3_draft_revision.sql` 增加草稿乐观并发 revision。草稿按图片唯一，版本按 `(pictureId, versionNumber)` 唯一且不可覆盖。
+- `/api/v1/pictures/{pictureId}/editor-state` 支持读取和自动保存 `EditorState v2`；服务端拒绝 v1、数组、字符串、空值和超过 4,000,000 字符的状态。
+- `/api/v1/pictures/{pictureId}/versions` 支持版本列表和 multipart 创建，创建时先写 MinIO 预览图，数据库写入失败会补偿删除对象。
+- 版本详情、鉴权版本内容和恢复接口已实现；恢复旧版本会创建新版本并更新当前草稿，不删除后续历史。
+- 草稿保存、条件删除和版本恢复由图片行锁串行化并校验 `expectedRevision`，陈旧请求返回 409；编辑器退出可保存草稿、回退本次会话或继续编辑，且固定返回图片详情页。
+- M3Service/M3Controller 已补所有权、格式错误、schema v2、存储补偿、版本号递增和恢复闭环测试；前端已切换 Fabric.js MIT、自有 EditorState v2 和统一 Canvas 导出管线。
+- 裁切、14 项调节（含高光/阴影/锐度）、图层、预览/导出一致性、编辑器 Playwright 和三视口视觉走查均已通过，M3-R 已完成开发闭环。
+- 版本资产随未来图片物理删除/空间删除联动清理仍是独立生命周期缺口；当前 M3 不提供物理删除能力，不影响本次编辑与版本关闭标准。
 
 Flyway 默认拒绝自动接管“已有业务表但没有迁移历史”的非空旧库，避免将不完整结构误标为已迁移。旧库接入前必须先审计并编写专用基线/补偿迁移。
 
@@ -143,9 +155,9 @@ M2 已通过 `V3__add_m2_ai_workflow.sql`、`V6__harden_m2_ai_workflow.sql`、`V
 
 实现细节：创建事务锁定用户和配额行；queued 取消释放 reserved，running 取消结算 used；供应商失败、超时及结果保存失败释放 reserved；进程重启会恢复 queued，超时 running 进入 failed。取消与成功保存竞争时，成功任务不会留下未关联图片。
 
-## 7. 邀请、评论、分享、版本与协作数据模型
+## 7. 邀请、评论、分享与协作数据模型
 
-当前 Java 实体只有 `User`、`Picture`、`Space`、`SpaceUser`；下列模型均未实现。表名仅为建议，最终通过领域评审和 Flyway 迁移确定。
+当前 Java 实体已包括 `User`、`Picture`、`Space`、`SpaceUser`、`PictureDraft`、`PictureVersion`；下列模型仍未实现。表名仅为建议，最终通过领域评审和 Flyway 迁移确定。
 
 | 模型 | 核心字段/约束 | 关键行为 |
 | --- | --- | --- |
@@ -153,7 +165,6 @@ M2 已通过 `V3__add_m2_ai_workflow.sql`、`V6__harden_m2_ai_workflow.sql`、`V
 | `notification` | user、type、actor、resource、payload、read_at | 邀请和评论通知；批量已读；不可依赖前端临时状态 |
 | `picture_comment` | picture、version、author、parent、body、position、status | 评论、回复、删除、解决；位置批注绑定明确版本 |
 | `picture_share` | picture、creator、token_hash、password_hash、expires_at、revoked_at、permissions | 原始 token 只返回一次；支持口令、有效期和撤销 |
-| `picture_version` | picture、number、parent_version、asset_url、thumbnail_url、editor_state、creator、created_at | 版本不可覆盖；恢复旧版时创建新版本 |
 | `collaboration_operation` | picture、version、operation_id、actor、server_seq、base_version、object_id、payload | 操作 ID 幂等、服务端排序、断线补偿和审计 |
 | `collaboration_snapshot` | picture、version、last_seq、editor_state、created_at | 加速加入房间和历史恢复；与操作日志边界明确 |
 
@@ -194,7 +205,8 @@ M2 已通过 `V3__add_m2_ai_workflow.sql`、`V6__harden_m2_ai_workflow.sql`、`V
 2. 修复团队空间创建事务，并完成存量用户个人空间补偿；注册自动创建个人空间已完成。
 3. ~~固定响应、错误、分页、ID、Cookie 和 OpenAPI 契约，建立 `/api/v1`。~~ M1 范围已完成。
 4. ~~交付认证、个人空间、图片上传/管理、公开只读和发布审核的 M1 闭环。~~ 已完成真实 E2E 验收。
-5. ~~实现 AI 任务与独立配额，再实现版本、邀请、评论、分享与通知。~~ M2 已完成；下一阶段进入 M3 版本与编辑器。
-6. 在版本和操作持久化模型稳定后，再重构实时协作协议。
+5. ~~实现 AI 任务与独立配额。~~ M2 已完成。
+6. ~~实现单人编辑器与版本持久化闭环。~~ M3-R 已完成全量生产验收；下一阶段进入 M4 团队与邀请。
+7. 在版本和操作持久化模型稳定后，再重构实时协作协议。
 
 每个阶段都必须有数据库迁移、服务层测试、控制器契约测试和鉴权测试；不能只以接口能返回成功作为完成标准。

@@ -35,6 +35,12 @@ spring:
   profiles:
     active: local
 
+logging:
+  level:
+    root: info
+    # MyBatis SQL 默认静默，避免逐条刷屏；排查 SQL 时把该包临时改为 debug 即可恢复
+    com.teacup.teacuppicturebackend.mapper: warn
+
 
 teacup:
   ai:
@@ -61,7 +67,8 @@ teacup:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: false
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # SQL 日志走 SLF4J，由上方 logging.level 统一控制
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
   global-config:
     db-config:
       logic-delete-field: isDelete

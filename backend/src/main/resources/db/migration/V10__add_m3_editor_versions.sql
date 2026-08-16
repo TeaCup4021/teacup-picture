@@ -1,0 +1,41 @@
+CREATE TABLE `picture_draft` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `pictureId` BIGINT NOT NULL,
+    `editorState` LONGTEXT NOT NULL,
+    `schemaVersion` INT NOT NULL DEFAULT 1,
+    `updatedBy` BIGINT NOT NULL,
+    `createTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updateTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_picture_draft_picture` (`pictureId`),
+    KEY `idx_picture_draft_updated_by` (`updatedBy`),
+    CONSTRAINT `fk_picture_draft_picture` FOREIGN KEY (`pictureId`) REFERENCES `picture` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_picture_draft_user` FOREIGN KEY (`updatedBy`) REFERENCES `user` (`id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE `picture_version` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `pictureId` BIGINT NOT NULL,
+    `versionNumber` INT NOT NULL,
+    `name` VARCHAR(128) NULL,
+    `note` VARCHAR(512) NULL,
+    `sourceType` VARCHAR(32) NOT NULL,
+    `parentVersionId` BIGINT NULL,
+    `editorState` LONGTEXT NOT NULL,
+    `schemaVersion` INT NOT NULL DEFAULT 1,
+    `assetObjectKey` VARCHAR(512) NULL,
+    `thumbnailObjectKey` VARCHAR(512) NULL,
+    `contentType` VARCHAR(128) NULL,
+    `width` INT NULL,
+    `height` INT NULL,
+    `size` BIGINT NULL,
+    `creatorId` BIGINT NOT NULL,
+    `createTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_picture_version_number` (`pictureId`, `versionNumber`),
+    KEY `idx_picture_version_picture` (`pictureId`),
+    KEY `idx_picture_version_parent` (`parentVersionId`),
+    CONSTRAINT `fk_picture_version_picture` FOREIGN KEY (`pictureId`) REFERENCES `picture` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_picture_version_creator` FOREIGN KEY (`creatorId`) REFERENCES `user` (`id`),
+    CONSTRAINT `fk_picture_version_parent` FOREIGN KEY (`parentVersionId`) REFERENCES `picture_version` (`id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;

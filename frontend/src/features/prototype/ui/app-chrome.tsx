@@ -36,6 +36,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
   const session = usePrototypeSession();
   const logout = usePrototypeLogout();
   if (pathname === "/login" || pathname === "/register") return children;
+  if (pathname.startsWith("/editor/")) return children;
 
   const isWorkspace = pathname.startsWith("/spaces/") || pathname === "/upload" || pathname.startsWith("/ai/");
   const isAdmin = pathname.startsWith("/admin/");

@@ -1,0 +1,310 @@
+openapi: 3.1.0
+info:
+  title: Teacup Picture M3 Editor & Version API
+  version: 1.0.0
+  description: >-
+    M3 contract for the single-user structured picture editor, autosaved drafts,
+    immutable picture versions, previews, authenticated version content, and
+    restoring an older version as a new current version.
+servers:
+  - url: http://localhost:8123/api/v1
+    description: Local backend
+tags:
+  - name: Editor
+  - name: Versions
+paths:
+  /pictures/{pictureId}/editor-state:
+    get:
+      tags: [Editor]
+      operationId: getEditorState
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      responses:
+        '200': { description: Current draft, content: { application/json: { schema: { $ref: '#/components/schemas/EditorStateResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Editor]
+      operationId: saveEditorState
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SaveEditorStateRequest' } } }
+      responses:
+        '200': { description: Saved draft, content: { application/json: { schema: { $ref: '#/components/schemas/EditorStateResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Editor]
+      operationId: deleteEditorState
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DeleteEditorStateRequest' } } }
+      responses:
+        '200': { description: Draft deleted, content: { application/json: { schema: { $ref: '#/components/schemas/EditorStateResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /pictures/{pictureId}/versions:
+    get:
+      tags: [Versions]
+      operationId: listPictureVersions
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      responses:
+        '200': { description: Versions ordered by versionNumber descending, content: { application/json: { schema: { $ref: '#/components/schemas/VersionListResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Versions]
+      operationId: createPictureVersion
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, editorState]
+              properties:
+                file: { type: string, format: binary, description: Rendered preview image written to private MinIO }
+                editorState: { type: string, description: JSON string containing the structured editor document }
+                name: { type: string, maxLength: 128 }
+                note: { type: string, maxLength: 512 }
+                sourceType: { $ref: '#/components/schemas/VersionSourceType' }
+      responses:
+        '201': { description: New immutable version, content: { application/json: { schema: { $ref: '#/components/schemas/VersionDetailResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /pictures/{pictureId}/versions/{versionId}:
+    get:
+      tags: [Versions]
+      operationId: getPictureVersion
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }, { $ref: '#/components/parameters/VersionId' }]
+      responses:
+        '200': { description: Version detail including structured editor state, content: { application/json: { schema: { $ref: '#/components/schemas/VersionDetailResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /pictures/{pictureId}/versions/{versionId}/restore:
+    post:
+      tags: [Versions]
+      operationId: restorePictureVersion
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }, { $ref: '#/components/parameters/VersionId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RestoreVersionRequest' } } }
+      responses:
+        '201': { description: New version created from the restored version and applied to the current draft, content: { application/json: { schema: { $ref: '#/components/schemas/VersionDetailResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /pictures/{pictureId}/versions/{versionId}/content:
+    get:
+      tags: [Versions]
+      operationId: getPictureVersionContent
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PictureId' }
+        - { $ref: '#/components/parameters/VersionId' }
+        - { in: query, name: variant, schema: { type: string, enum: [original, thumbnail], default: original } }
+      responses:
+        '200': { description: Authenticated version image content, content: { image/*: { schema: { type: string, format: binary } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    cookieAuth: { type: apiKey, in: cookie, name: TEACUP_SESSION }
+  parameters:
+    PictureId: { in: path, name: pictureId, required: true, schema: { $ref: '#/components/schemas/Id' } }
+    VersionId: { in: path, name: versionId, required: true, schema: { $ref: '#/components/schemas/Id' } }
+  responses:
+    BadRequest: { description: Invalid parameter or malformed editor state }
+    Unauthorized: { description: Missing or invalid session cookie }
+    NotFound: { description: Resource does not exist or is not visible to the caller }
+    Conflict: { description: Draft revision is stale; reload before retrying }
+  schemas:
+    Id: { type: string, pattern: '^[1-9][0-9]*$' }
+    Revision: { type: string, pattern: '^[1-9][0-9]*$', description: Optimistic concurrency revision serialized as a decimal string }
+    VersionSourceType: { type: string, enum: [user_save, restore, ai_generate, ai_outpaint, team_confirm] }
+    EditorDocument:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, canvas, transform, crop, adjustments, layers]
+      properties:
+        schemaVersion: { type: integer, enum: [2] }
+        canvas:
+          type: object
+          additionalProperties: false
+          required: [width, height]
+          properties:
+            width: { type: integer, minimum: 1, maximum: 32768 }
+            height: { type: integer, minimum: 1, maximum: 32768 }
+        transform:
+          type: object
+          additionalProperties: false
+          required: [rotation, scale]
+          properties:
+            rotation: { type: number, minimum: -360, maximum: 360 }
+            scale: { type: number, minimum: 0.25, maximum: 4 }
+        crop:
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [x, y, width, height]
+              properties:
+                x: { type: number, minimum: 0 }
+                y: { type: number, minimum: 0 }
+                width: { type: number, exclusiveMinimum: 0 }
+                height: { type: number, exclusiveMinimum: 0 }
+        adjustments:
+          type: object
+          additionalProperties: false
+          required: [exposure, brightness, contrast, highlights, shadows, saturation, vibrance, temperature, tint, sharpness, fade, vignette, enhance, dehaze]
+          properties:
+            exposure: { type: number, minimum: -100, maximum: 100 }
+            brightness: { type: number, minimum: -100, maximum: 100 }
+            contrast: { type: number, minimum: -100, maximum: 100 }
+            highlights: { type: number, minimum: -100, maximum: 100 }
+            shadows: { type: number, minimum: -100, maximum: 100 }
+            saturation: { type: number, minimum: -100, maximum: 100 }
+            vibrance: { type: number, minimum: -100, maximum: 100 }
+            temperature: { type: number, minimum: -100, maximum: 100 }
+            tint: { type: number, minimum: -100, maximum: 100 }
+            sharpness: { type: number, minimum: -100, maximum: 100 }
+            fade: { type: number, minimum: 0, maximum: 100 }
+            vignette: { type: number, minimum: -100, maximum: 100 }
+            enhance: { type: number, minimum: 0, maximum: 100 }
+            dehaze: { type: number, minimum: 0, maximum: 100 }
+        layers:
+          type: array
+          maxItems: 500
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/TextLayer'
+              - $ref: '#/components/schemas/DrawingLayer'
+    TextLayer:
+      type: object
+      additionalProperties: false
+      required: [id, type, text, left, top, fontSize, color, fontFamily, fontWeight, angle, scaleX, scaleY]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 128 }
+        type: { type: string, enum: [text] }
+        text: { type: string, maxLength: 2000 }
+        left: { type: number, minimum: -1000000, maximum: 1000000 }
+        top: { type: number, minimum: -1000000, maximum: 1000000 }
+        fontSize: { type: number, minimum: 8, maximum: 512 }
+        color: { type: string, pattern: '^#[0-9a-fA-F]{6,8}$' }
+        fontFamily: { type: string, minLength: 1, maxLength: 128 }
+        fontWeight: { type: string, minLength: 1, maxLength: 32 }
+        angle: { type: number, minimum: -36000, maximum: 36000 }
+        scaleX: { type: number, exclusiveMinimum: 0, maximum: 100 }
+        scaleY: { type: number, exclusiveMinimum: 0, maximum: 100 }
+    DrawingLayer:
+      type: object
+      additionalProperties: false
+      required: [id, type, tool, color, size, opacity, path, left, top, scaleX, scaleY, angle]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 128 }
+        type: { type: string, enum: [drawing] }
+        tool: { type: string, enum: [pen, marker, eraser] }
+        color: { type: string, pattern: '^#[0-9a-fA-F]{6,8}$' }
+        size: { type: number, minimum: 1, maximum: 100 }
+        opacity: { type: number, minimum: 0, maximum: 1 }
+        path:
+          type: array
+          maxItems: 20000
+          items:
+            oneOf:
+              - { type: array, prefixItems: [{ const: M }, { type: number }, { type: number }], minItems: 3, maxItems: 3 }
+              - { type: array, prefixItems: [{ const: L }, { type: number }, { type: number }], minItems: 3, maxItems: 3 }
+              - { type: array, prefixItems: [{ const: Q }, { type: number }, { type: number }, { type: number }, { type: number }], minItems: 5, maxItems: 5 }
+              - { type: array, prefixItems: [{ const: C }, { type: number }, { type: number }, { type: number }, { type: number }, { type: number }, { type: number }], minItems: 7, maxItems: 7 }
+              - { type: array, prefixItems: [{ const: Z }], minItems: 1, maxItems: 1 }
+        left: { type: number, minimum: -1000000, maximum: 1000000 }
+        top: { type: number, minimum: -1000000, maximum: 1000000 }
+        scaleX: { type: number, exclusiveMinimum: 0, maximum: 100 }
+        scaleY: { type: number, exclusiveMinimum: 0, maximum: 100 }
+        angle: { type: number, minimum: -36000, maximum: 36000 }
+    EditorState:
+      type: object
+      required: [editorState, updatedAt, revision]
+      properties:
+        editorState: { oneOf: [{ $ref: '#/components/schemas/EditorDocument' }, { type: 'null' }] }
+        updatedAt: { type: [string, 'null'], format: date-time }
+        revision:
+          oneOf:
+            - { $ref: '#/components/schemas/Revision' }
+            - { type: 'null' }
+    SaveEditorStateRequest:
+      type: object
+      required: [editorState, expectedRevision]
+      properties:
+        editorState: { $ref: '#/components/schemas/EditorDocument' }
+        expectedRevision:
+          oneOf:
+            - { $ref: '#/components/schemas/Revision' }
+            - { type: 'null' }
+    DeleteEditorStateRequest:
+      type: object
+      required: [expectedRevision]
+      properties:
+        expectedRevision:
+          oneOf:
+            - { $ref: '#/components/schemas/Revision' }
+            - { type: 'null' }
+    RestoreVersionRequest:
+      type: object
+      required: [expectedRevision]
+      properties:
+        expectedRevision:
+          oneOf:
+            - { $ref: '#/components/schemas/Revision' }
+            - { type: 'null' }
+    EditorStateResponse: { $ref: '#/components/schemas/EditorState' }
+    Author:
+      type: object
+      required: [id, name]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        name: { type: string }
+        avatarUrl: { type: [string, 'null'], format: uri }
+    VersionSummary:
+      type: object
+      required: [id, versionNumber, name, sourceType, parentVersionId, width, height, thumbnailUrl, creator, createdAt]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        versionNumber: { type: integer, minimum: 1 }
+        name: { type: string }
+        note: { type: [string, 'null'] }
+        sourceType: { $ref: '#/components/schemas/VersionSourceType' }
+        parentVersionId: { type: [string, 'null'], pattern: '^[1-9][0-9]*$' }
+        width: { type: integer }
+        height: { type: integer }
+        thumbnailUrl: { type: string, format: uri }
+        creator: { $ref: '#/components/schemas/Author' }
+        createdAt: { type: string, format: date-time }
+    VersionDetail:
+      allOf:
+        - { $ref: '#/components/schemas/VersionSummary' }
+        - type: object
+          required: [previewUrl, editorState]
+          properties:
+            previewUrl: { type: string, format: uri }
+            editorState: { $ref: '#/components/schemas/EditorDocument' }
+    VersionList:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/VersionSummary' } } }
+    VersionListResponse: { $ref: '#/components/schemas/VersionList' }
+    VersionDetailResponse: { $ref: '#/components/schemas/VersionDetail' }
