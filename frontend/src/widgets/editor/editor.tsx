@@ -1,8 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftOutlined } from "@ant-design/icons";
-import { App, Button, ColorPicker, Form, Input, InputNumber, Modal, Result, Skeleton, Slider, Space, Tooltip, Typography } from "antd";
+import {
+  App,
+  Button,
+  ColorPicker,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Result,
+  Skeleton,
+  Slider,
+  Space,
+  Tooltip,
+  Typography,
+} from "antd";
 import type { UseMutationResult } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { usePrototypeSession } from "@/features/prototype";
@@ -33,7 +47,17 @@ import { EditorCanvas } from "@/features/editor/ui/editor-canvas";
 import { EditorInspector } from "@/features/editor/ui/editor-inspector";
 import { EditorToolbar, EditorToolRail } from "@/features/editor/ui/editor-toolbar";
 import { VersionPanel } from "@/features/editor/ui/version-panel";
-import type { AdjustmentKey, CropRect, EditorDocument, EditorDraft, EditorLayer, EditorTool, PictureVersionDetail, PictureVersionSummary, RestoreVersionResult } from "@/features/editor/model/types";
+import type {
+  AdjustmentKey,
+  CropRect,
+  EditorDocument,
+  EditorDraft,
+  EditorLayer,
+  EditorTool,
+  PictureVersionDetail,
+  PictureVersionSummary,
+  RestoreVersionResult,
+} from "@/features/editor/model/types";
 
 interface EditorProps {
   pictureId: string;
@@ -44,6 +68,11 @@ type CreateVersionInput = {
   preview: Blob;
   name: string;
   note: string;
+};
+
+type AdjustmentPreview = {
+  key: AdjustmentKey;
+  value: number;
 };
 
 export function Editor({ pictureId }: EditorProps) {
@@ -57,15 +86,61 @@ export function Editor({ pictureId }: EditorProps) {
   const createVersion = useCreatePictureVersion(pictureId);
   const restoreVersion = useRestorePictureVersion(pictureId);
 
-  if (session.isLoading) return <main className="content-shell"><Skeleton active paragraph={{ rows: 12 }} /></main>;
-  if (!session.data) return <Result status="403" title="登录后编辑图片" extra={<Button type="primary" href="/login">去登录</Button>} />;
-  if (picture.isLoading || draft.isLoading) return <main className="content-shell"><Skeleton active paragraph={{ rows: 12 }} /></main>;
-  if (picture.isError) return <Result status="error" title="图片读取失败" subTitle="请稍后重试或返回个人空间" extra={<Button href="/spaces/personal">返回个人空间</Button>} />;
-  if (draft.isError) return <Result status="error" title="草稿读取失败" subTitle="当前编辑状态未加载，避免覆盖已有内容" extra={<Button onClick={() => void draft.refetch()}>重试</Button>} />;
+  if (session.isLoading)
+    return (
+      <main className="content-shell">
+        <Skeleton active paragraph={{ rows: 12 }} />
+      </main>
+    );
+  if (!session.data)
+    return (
+      <Result
+        status="403"
+        title="登录后编辑图片"
+        extra={
+          <Button type="primary" href="/login">
+            去登录
+          </Button>
+        }
+      />
+    );
+  if (picture.isLoading || draft.isLoading)
+    return (
+      <main className="content-shell">
+        <Skeleton active paragraph={{ rows: 12 }} />
+      </main>
+    );
+  if (picture.isError)
+    return (
+      <Result
+        status="error"
+        title="图片读取失败"
+        subTitle="请稍后重试或返回个人空间"
+        extra={<Button href="/spaces/personal">返回个人空间</Button>}
+      />
+    );
+  if (draft.isError)
+    return (
+      <Result
+        status="error"
+        title="草稿读取失败"
+        subTitle="当前编辑状态未加载，避免覆盖已有内容"
+        extra={<Button onClick={() => void draft.refetch()}>重试</Button>}
+      />
+    );
   if (!picture.data) return <Result status="404" title="图片不存在或不可见" />;
-  if (baseImage.isError) return <Result status="error" title="原图读取失败" subTitle="编辑器不会在原图缺失时保存空白内容" extra={<Button onClick={() => void baseImage.refetch()}>重试</Button>} />;
+  if (baseImage.isError)
+    return (
+      <Result
+        status="error"
+        title="原图读取失败"
+        subTitle="编辑器不会在原图缺失时保存空白内容"
+        extra={<Button onClick={() => void baseImage.refetch()}>重试</Button>}
+      />
+    );
 
-  const initialDocument = draft.data?.editorState ?? createEmptyDocument(picture.data.width, picture.data.height);
+  const initialDocument =
+    draft.data?.editorState ?? createEmptyDocument(picture.data.width, picture.data.height);
   return (
     <EditorWorkspace
       picture={picture.data}
@@ -131,23 +206,36 @@ function EditorWorkspace({
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [versionName, setVersionName] = useState("");
   const [versionNote, setVersionNote] = useState("");
-  const [saveState, setSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">("idle");
+  const [saveState, setSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">(
+    "idle",
+  );
   const [exitModalOpen, setExitModalOpen] = useState(false);
   const [exitAction, setExitAction] = useState<"save" | "discard" | null>(null);
   const [baseline, setBaseline] = useState<EditorDocument>(() => cloneDocument(initialDocument));
   const [baselineHadDraft, setBaselineHadDraft] = useState(initialDraft !== null);
   const [sessionTouched, setSessionTouched] = useState(false);
+  const [adjustmentPreview, setAdjustmentPreview] = useState<AdjustmentPreview | null>(null);
+  const effectiveDocument = useMemo(
+    () =>
+      adjustmentPreview
+        ? setAdjustment(document, adjustmentPreview.key, adjustmentPreview.value)
+        : document,
+    [adjustmentPreview, document],
+  );
+  const canvasDocument = useDeferredValue(effectiveDocument);
   const documentRef = useRef(document);
   const revisionRef = useRef<string | null>(initialDraft?.revision ?? null);
-  const lastSavedRef = useRef<EditorDocument | null>(initialDraft ? cloneDocument(initialDraft.editorState) : null);
+  const lastSavedRef = useRef<EditorDocument | null>(
+    initialDraft ? cloneDocument(initialDraft.editorState) : null,
+  );
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const autosaveSuspendedRef = useRef(false);
   const saveDraftRef = useRef(saveDraft.mutateAsync);
   const deleteDraftRef = useRef(deleteDraft.mutateAsync);
 
   useEffect(() => {
-    documentRef.current = document;
-  }, [document]);
+    documentRef.current = effectiveDocument;
+  }, [effectiveDocument]);
 
   useEffect(() => {
     saveDraftRef.current = saveDraft.mutateAsync;
@@ -163,25 +251,29 @@ function EditorWorkspace({
     return result;
   }, []);
 
-  const persistSnapshot = useCallback((target: EditorDocument, force = false): Promise<void> => {
-    const snapshot = cloneDocument(target);
-    return enqueueDraftOperation(async () => {
-      if (!force && lastSavedRef.current && documentsEqual(lastSavedRef.current, snapshot)) return;
-      setSaveState("saving");
-      try {
-        const saved = await saveDraftRef.current({
-          document: snapshot,
-          expectedRevision: revisionRef.current,
-        });
-        revisionRef.current = saved.revision;
-        lastSavedRef.current = cloneDocument(saved.editorState);
-        setSaveState(documentsEqual(documentRef.current, snapshot) ? "saved" : "dirty");
-      } catch (error) {
-        setSaveState("error");
-        throw error;
-      }
-    });
-  }, [enqueueDraftOperation]);
+  const persistSnapshot = useCallback(
+    (target: EditorDocument, force = false): Promise<void> => {
+      const snapshot = cloneDocument(target);
+      return enqueueDraftOperation(async () => {
+        if (!force && lastSavedRef.current && documentsEqual(lastSavedRef.current, snapshot))
+          return;
+        setSaveState("saving");
+        try {
+          const saved = await saveDraftRef.current({
+            document: snapshot,
+            expectedRevision: revisionRef.current,
+          });
+          revisionRef.current = saved.revision;
+          lastSavedRef.current = cloneDocument(saved.editorState);
+          setSaveState(documentsEqual(documentRef.current, snapshot) ? "saved" : "dirty");
+        } catch (error) {
+          setSaveState("error");
+          throw error;
+        }
+      });
+    },
+    [enqueueDraftOperation],
+  );
 
   useEffect(() => {
     if (!sessionTouched || autosaveSuspendedRef.current) return;
@@ -193,10 +285,17 @@ function EditorWorkspace({
     return () => window.clearTimeout(timer);
   }, [document, persistSnapshot, sessionTouched]);
 
-  const hasSessionChanges = sessionTouched && !documentsEqual(document, baseline);
+  const hasSessionChanges =
+    (sessionTouched || adjustmentPreview !== null) && !documentsEqual(effectiveDocument, baseline);
 
   useEffect(() => {
-    if (!hasSessionChanges && saveState !== "dirty" && saveState !== "saving" && saveState !== "error") return;
+    if (
+      !hasSessionChanges &&
+      saveState !== "dirty" &&
+      saveState !== "saving" &&
+      saveState !== "error"
+    )
+      return;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
@@ -205,15 +304,22 @@ function EditorWorkspace({
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [hasSessionChanges, saveState]);
 
-  const commit = useCallback((next: EditorDocument) => {
-    setSessionTouched(true);
-    setPast((items) => [...items.slice(-49), cloneDocument(document)]);
-    setFuture([]);
-    setDocument(cloneDocument(next));
-    setSaveState("dirty");
-  }, [document]);
+  const commit = useCallback(
+    (next: EditorDocument) => {
+      setAdjustmentPreview(null);
+      setSessionTouched(true);
+      setPast((items) => [...items.slice(-49), cloneDocument(document)]);
+      setFuture([]);
+      setDocument(cloneDocument(next));
+      setSaveState("dirty");
+    },
+    [document],
+  );
 
-  const selectedLayer = useMemo(() => document.layers.find((layer) => layer.id === selectedLayerId) ?? null, [document.layers, selectedLayerId]);
+  const selectedLayer = useMemo(
+    () => document.layers.find((layer) => layer.id === selectedLayerId) ?? null,
+    [document.layers, selectedLayerId],
+  );
 
   function undo() {
     const previous = past[past.length - 1];
@@ -242,7 +348,17 @@ function EditorWorkspace({
     commit(next);
   }
 
-  function handleAdjustment(key: AdjustmentKey, value: number) {
+  function handleAdjustmentPreview(key: AdjustmentKey, value: number) {
+    if (document.adjustments[key] === value) {
+      setAdjustmentPreview(null);
+      return;
+    }
+    setAdjustmentPreview({ key, value });
+  }
+
+  function handleAdjustmentCommit(key: AdjustmentKey, value: number) {
+    setAdjustmentPreview(null);
+    if (document.adjustments[key] === value) return;
     commit(setAdjustment(document, key, value));
   }
 
@@ -284,7 +400,7 @@ function EditorWorkspace({
       return;
     }
     try {
-      const blob = await exportEditorDocument(document, image, "image/png");
+      const blob = await exportEditorDocument(effectiveDocument, image, "image/png");
       const url = URL.createObjectURL(blob);
       const anchor = window.document.createElement("a");
       anchor.href = url;
@@ -302,7 +418,7 @@ function EditorWorkspace({
       return;
     }
     autosaveSuspendedRef.current = true;
-    const snapshot = cloneDocument(document);
+    const snapshot = cloneDocument(effectiveDocument);
     try {
       await persistSnapshot(snapshot, true);
       const preview = await exportEditorDocument(snapshot, image, "image/png");
@@ -330,7 +446,7 @@ function EditorWorkspace({
   async function handleRestore(versionId: string) {
     autosaveSuspendedRef.current = true;
     try {
-      await persistSnapshot(document, true);
+      await persistSnapshot(effectiveDocument, true);
       const restored = await restoreVersion.mutateAsync({
         versionId,
         expectedRevision: revisionRef.current,
@@ -389,7 +505,7 @@ function EditorWorkspace({
     autosaveSuspendedRef.current = true;
     setExitAction("save");
     try {
-      await persistSnapshot(document, true);
+      await persistSnapshot(effectiveDocument, true);
       setSessionTouched(false);
       router.push(`/pictures/${picture.id}`);
     } catch (error) {
@@ -411,7 +527,16 @@ function EditorWorkspace({
     router.push(`/pictures/${picture.id}`);
   }
 
-  const saveLabel = saveState === "saving" ? "保存中…" : saveState === "saved" ? "已保存" : saveState === "error" ? "保存失败" : saveState === "dirty" ? "未保存" : "草稿";
+  const saveLabel =
+    saveState === "saving"
+      ? "保存中…"
+      : saveState === "saved"
+        ? "已保存"
+        : saveState === "error"
+          ? "保存失败"
+          : saveState === "dirty"
+            ? "未保存"
+            : "草稿";
 
   return (
     <main className="editor-frame">
@@ -428,7 +553,10 @@ function EditorWorkspace({
             />
           </Tooltip>
           <span className="editor-brand-mark">茶</span>
-          <div className="editor-title-copy"><Typography.Text strong>{picture.title}</Typography.Text><Typography.Text className="editor-save-state">{saveLabel}</Typography.Text></div>
+          <div className="editor-title-copy">
+            <Typography.Text strong>{picture.title}</Typography.Text>
+            <Typography.Text className="editor-save-state">{saveLabel}</Typography.Text>
+          </div>
         </div>
         <EditorToolbar
           zoom={document.transform.scale}
@@ -447,7 +575,7 @@ function EditorWorkspace({
       <div className="editor-body">
         <EditorToolRail tool={tool} onToolChange={setTool} />
         <EditorCanvas
-          document={document}
+          document={canvasDocument}
           image={imageError ? null : image}
           tool={tool}
           strokeColor={strokeColor}
@@ -461,25 +589,61 @@ function EditorWorkspace({
           onCropCancel={handleCropCancel}
         />
         <aside className="editor-side-panel">
-          <div className="editor-side-heading"><Typography.Title level={5}>属性面板</Typography.Title><Typography.Text type="secondary">{toolName(tool)}</Typography.Text></div>
+          <div className="editor-side-heading">
+            <Typography.Title level={5}>属性面板</Typography.Title>
+            <Typography.Text type="secondary">{toolName(tool)}</Typography.Text>
+          </div>
           {tool === "pen" || tool === "marker" || tool === "eraser" ? (
             <div className="editor-stroke-panel">
-              {tool !== "eraser" ? <div className="editor-control-row"><span>笔刷颜色</span><ColorPicker value={strokeColor} onChange={(color) => setStrokeColor(color.toHexString())} /></div> : null}
-              <div className="editor-control-row"><span>笔刷粗细</span><Typography.Text type="secondary">{strokeSize}px</Typography.Text></div>
-              <Slider ariaLabelForHandle="笔刷粗细" min={1} max={80} value={strokeSize} onChange={setStrokeSize} />
+              {tool !== "eraser" ? (
+                <div className="editor-control-row">
+                  <span>笔刷颜色</span>
+                  <ColorPicker
+                    value={strokeColor}
+                    onChange={(color) => setStrokeColor(color.toHexString())}
+                  />
+                </div>
+              ) : null}
+              <div className="editor-control-row">
+                <span>笔刷粗细</span>
+                <Typography.Text type="secondary">{strokeSize}px</Typography.Text>
+              </div>
+              <Slider
+                ariaLabelForHandle="笔刷粗细"
+                min={1}
+                max={80}
+                value={strokeSize}
+                onChange={setStrokeSize}
+              />
             </div>
           ) : null}
           {tool === "text" ? (
             <div className="editor-stroke-panel">
-              <div className="editor-control-row"><span>文字颜色</span><ColorPicker value={textColor} onChange={(color) => setTextColor(color.toHexString())} /></div>
-              <div className="editor-control-row"><span>文字字号</span><InputNumber aria-label="文字字号" min={12} max={240} value={fontSize} onChange={(value) => setFontSize(value ?? 32)} /></div>
+              <div className="editor-control-row">
+                <span>文字颜色</span>
+                <ColorPicker
+                  value={textColor}
+                  onChange={(color) => setTextColor(color.toHexString())}
+                />
+              </div>
+              <div className="editor-control-row">
+                <span>文字字号</span>
+                <InputNumber
+                  aria-label="文字字号"
+                  min={12}
+                  max={240}
+                  value={fontSize}
+                  onChange={(value) => setFontSize(value ?? 32)}
+                />
+              </div>
             </div>
           ) : null}
           <EditorInspector
-            adjustments={document.adjustments}
+            adjustments={effectiveDocument.adjustments}
             layers={document.layers}
             selectedLayer={selectedLayer}
-            onAdjustmentChange={handleAdjustment}
+            onAdjustmentPreview={handleAdjustmentPreview}
+            onAdjustmentCommit={handleAdjustmentCommit}
             onLayerSelect={setSelectedLayerId}
             onLayerChange={handleLayerChange}
             onLayerDelete={handleLayerDelete}
@@ -488,7 +652,13 @@ function EditorWorkspace({
         </aside>
       </div>
 
-      <div className="editor-mobile-status"><Space size={8}><span className="editor-status-dot" />{saveLabel}<Typography.Text type="secondary">{document.layers.length} 个图层</Typography.Text></Space></div>
+      <div className="editor-mobile-status">
+        <Space size={8}>
+          <span className="editor-status-dot" />
+          {saveLabel}
+          <Typography.Text type="secondary">{document.layers.length} 个图层</Typography.Text>
+        </Space>
+      </div>
 
       <VersionPanel
         open={versionPanelOpen}
@@ -511,8 +681,25 @@ function EditorWorkspace({
         onOk={() => void handleSaveVersion()}
       >
         <Form layout="vertical">
-          <Form.Item label="版本名称" htmlFor="editor-version-name"><Input id="editor-version-name" autoFocus value={versionName} onChange={(event) => setVersionName(event.target.value)} placeholder="例如：春季宣传图" maxLength={128} /></Form.Item>
-          <Form.Item label="版本说明" htmlFor="editor-version-note"><Input.TextArea id="editor-version-note" value={versionNote} onChange={(event) => setVersionNote(event.target.value)} rows={3} maxLength={512} /></Form.Item>
+          <Form.Item label="版本名称" htmlFor="editor-version-name">
+            <Input
+              id="editor-version-name"
+              autoFocus
+              value={versionName}
+              onChange={(event) => setVersionName(event.target.value)}
+              placeholder="例如：春季宣传图"
+              maxLength={128}
+            />
+          </Form.Item>
+          <Form.Item label="版本说明" htmlFor="editor-version-note">
+            <Input.TextArea
+              id="editor-version-note"
+              value={versionNote}
+              onChange={(event) => setVersionNote(event.target.value)}
+              rows={3}
+              maxLength={512}
+            />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -524,7 +711,11 @@ function EditorWorkspace({
         keyboard={exitAction === null}
         onCancel={() => setExitModalOpen(false)}
         footer={[
-          <Button key="continue" disabled={exitAction !== null} onClick={() => setExitModalOpen(false)}>
+          <Button
+            key="continue"
+            disabled={exitAction !== null}
+            onClick={() => setExitModalOpen(false)}
+          >
             继续编辑
           </Button>,
           <Button

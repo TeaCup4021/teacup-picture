@@ -17,7 +17,9 @@ type VersionsEnvelope = {
   data: { items: Array<{ id: string; sourceType: string; parentVersionId: string | null }> };
 };
 
-test("M3 editor completes the structured edit, export, version, and restore flow", async ({ page }) => {
+test("M3 editor completes the structured edit, export, version, and restore flow", async ({
+  page,
+}) => {
   test.setTimeout(150_000);
   const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
   const account = `m3u${suffix}`;
@@ -47,7 +49,10 @@ test("M3 editor completes the structured edit, export, version, and restore flow
 
   const draftWrites: number[] = [];
   page.on("response", (response) => {
-    if (response.request().method() === "PUT" && response.url().endsWith(`/pictures/${pictureId}/editor-state`)) {
+    if (
+      response.request().method() === "PUT" &&
+      response.url().endsWith(`/pictures/${pictureId}/editor-state`)
+    ) {
       draftWrites.push(response.status());
     }
   });
@@ -57,13 +62,34 @@ test("M3 editor completes the structured edit, export, version, and restore flow
   await page.waitForTimeout(1_200);
   expect(draftWrites).toEqual([]);
 
-  const initialCanvas = await page.locator(".lower-canvas").evaluate((canvas) =>
-    (canvas as HTMLCanvasElement).toDataURL("image/png"),
-  );
-  const upperBackground = await page.locator(".upper-canvas").evaluate((canvas) => getComputedStyle(canvas).backgroundColor);
+  const initialCanvas = await page
+    .locator(".lower-canvas")
+    .evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL("image/png"));
+  const upperBackground = await page
+    .locator(".upper-canvas")
+    .evaluate((canvas) => getComputedStyle(canvas).backgroundColor);
   expect(upperBackground).toBe("rgba(0, 0, 0, 0)");
 
-  await page.getByRole("slider", { name: "曝光", exact: true }).press("ArrowRight");
+  const initialExposure = page.getByRole("slider", { name: "曝光", exact: true });
+  const exposureBox = await initialExposure.boundingBox();
+  expect(exposureBox).not.toBeNull();
+  await page.mouse.move(
+    exposureBox!.x + exposureBox!.width / 2,
+    exposureBox!.y + exposureBox!.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    exposureBox!.x + exposureBox!.width * 0.8,
+    exposureBox!.y + exposureBox!.height / 2,
+    { steps: 20 },
+  );
+  await page.mouse.up();
+  const draggedExposure = Number(await initialExposure.getAttribute("aria-valuenow"));
+  expect(draggedExposure).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "撤销" }).click();
+  await expect(initialExposure).toHaveAttribute("aria-valuenow", "0");
+  await page.getByRole("button", { name: "重做" }).click();
+  await expect(initialExposure).toHaveAttribute("aria-valuenow", String(draggedExposure));
   await expect.poll(() => draftWrites.filter((status) => status === 200).length).toBeGreaterThan(0);
   await page.getByRole("button", { name: /退出编辑/ }).click();
   const exitDialog = page.getByRole("dialog", { name: /退出编辑/ });
@@ -73,10 +99,15 @@ test("M3 editor completes the structured edit, export, version, and restore flow
   await exitDialog.getByRole("button", { name: "继续编辑" }).click();
   await expect(page).toHaveURL(`/editor/${pictureId}`);
   await page.getByRole("button", { name: /退出编辑/ }).click();
-  await page.getByRole("dialog", { name: /退出编辑/ }).getByRole("button", { name: "不保存并退出" }).click();
+  await page
+    .getByRole("dialog", { name: /退出编辑/ })
+    .getByRole("button", { name: "不保存并退出" })
+    .click();
   await page.waitForURL(`/pictures/${pictureId}`);
   const discardedInitialDraft = await page.evaluate<EditorStateEnvelope, string>(async (id) => {
-    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, { credentials: "include" });
+    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, {
+      credentials: "include",
+    });
     return response.json();
   }, pictureId!);
   expect(discardedInitialDraft.data.editorState).toBeNull();
@@ -87,8 +118,20 @@ test("M3 editor completes the structured edit, export, version, and restore flow
   await page.locator(".upper-canvas").waitFor({ state: "visible" });
 
   const adjustments = [
-    "曝光", "亮度", "对比度", "高光", "阴影", "饱和度", "自然饱和度",
-    "色温", "色调", "锐度", "褪色", "暗角", "增强", "去雾",
+    "曝光",
+    "亮度",
+    "对比度",
+    "高光",
+    "阴影",
+    "饱和度",
+    "自然饱和度",
+    "色温",
+    "色调",
+    "锐度",
+    "褪色",
+    "暗角",
+    "增强",
+    "去雾",
   ];
   for (const name of adjustments) {
     const slider = page.getByRole("slider", { name, exact: true });
@@ -96,15 +139,18 @@ test("M3 editor completes the structured edit, export, version, and restore flow
     await slider.press("ArrowRight");
   }
   await expect.poll(() => draftWrites.filter((status) => status === 200).length).toBeGreaterThan(0);
-  const adjustedCanvas = await page.locator(".lower-canvas").evaluate((canvas) =>
-    (canvas as HTMLCanvasElement).toDataURL("image/png"),
-  );
+  const adjustedCanvas = await page
+    .locator(".lower-canvas")
+    .evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL("image/png"));
   expect(adjustedCanvas).not.toBe(initialCanvas);
 
   await page.getByRole("button", { name: "文字", exact: true }).click();
   let canvasBox = await page.locator(".upper-canvas").boundingBox();
   expect(canvasBox).not.toBeNull();
-  await page.mouse.click(canvasBox!.x + canvasBox!.width * 0.5, canvasBox!.y + canvasBox!.height * 0.5);
+  await page.mouse.click(
+    canvasBox!.x + canvasBox!.width * 0.5,
+    canvasBox!.y + canvasBox!.height * 0.5,
+  );
   await page.keyboard.type("验收文字");
   await page.waitForTimeout(450);
   await page.getByRole("button", { name: "选择", exact: true }).click();
@@ -129,7 +175,9 @@ test("M3 editor completes the structured edit, export, version, and restore flow
   await page.waitForTimeout(1_200);
 
   const draft = await page.evaluate<EditorStateEnvelope, string>(async (id) => {
-    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, { credentials: "include" });
+    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, {
+      credentials: "include",
+    });
     return response.json();
   }, pictureId!);
   const draftDocument = draft.data.editorState!;
@@ -138,7 +186,9 @@ test("M3 editor completes the structured edit, export, version, and restore flow
   expect(draftDocument.adjustments).toMatchObject({ highlights: 1, shadows: 1, sharpness: 1 });
   expect(draftDocument.layers.filter((layer) => layer.type === "drawing")).toHaveLength(3);
   expect(draftDocument.layers.find((layer) => layer.tool === "marker")?.opacity).toBe(0.35);
-  expect(draftDocument.layers.some((layer) => layer.type === "text" && layer.text === "验收文字")).toBe(true);
+  expect(
+    draftDocument.layers.some((layer) => layer.type === "text" && layer.text === "验收文字"),
+  ).toBe(true);
 
   const download = await Promise.all([
     page.waitForEvent("download"),
@@ -156,10 +206,15 @@ test("M3 editor completes the structured edit, export, version, and restore flow
   await page.getByRole("slider", { name: "曝光", exact: true }).press("ArrowRight");
   await expect.poll(() => draftWrites.length).toBeGreaterThan(writesBeforeDiscard);
   await page.getByRole("button", { name: /退出编辑/ }).click();
-  await page.getByRole("dialog", { name: /退出编辑/ }).getByRole("button", { name: "不保存并退出" }).click();
+  await page
+    .getByRole("dialog", { name: /退出编辑/ })
+    .getByRole("button", { name: "不保存并退出" })
+    .click();
   await page.waitForURL(`/pictures/${pictureId}`);
   const discardedAfterVersion = await page.evaluate<EditorStateEnvelope, string>(async (id) => {
-    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, { credentials: "include" });
+    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, {
+      credentials: "include",
+    });
     return response.json();
   }, pictureId!);
   expect(discardedAfterVersion.data.editorState?.adjustments.exposure).toBe(1);
@@ -175,20 +230,32 @@ test("M3 editor completes the structured edit, export, version, and restore flow
 
   await page.getByRole("slider", { name: "曝光", exact: true }).press("ArrowRight");
   await page.getByRole("button", { name: /退出编辑/ }).click();
-  await page.getByRole("dialog", { name: /退出编辑/ }).getByRole("button", { name: "保存草稿并退出" }).click();
+  await page
+    .getByRole("dialog", { name: /退出编辑/ })
+    .getByRole("button", { name: "保存草稿并退出" })
+    .click();
   await page.waitForURL(`/pictures/${pictureId}`);
   const savedOnExit = await page.evaluate<EditorStateEnvelope, string>(async (id) => {
-    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, { credentials: "include" });
+    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, {
+      credentials: "include",
+    });
     return response.json();
   }, pictureId!);
   expect(savedOnExit.data.editorState?.adjustments.exposure).toBe(2);
-  expect(Number(savedOnExit.data.revision)).toBeGreaterThan(Number(discardedAfterVersion.data.revision ?? 0));
+  expect(Number(savedOnExit.data.revision)).toBeGreaterThan(
+    Number(discardedAfterVersion.data.revision ?? 0),
+  );
 
   const versions = await page.evaluate<VersionsEnvelope, string>(async (id) => {
-    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/versions`, { credentials: "include" });
+    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/versions`, {
+      credentials: "include",
+    });
     return response.json();
   }, pictureId!);
-  expect(versions.data.items.map((version) => version.sourceType)).toEqual(["restore", "user_save"]);
+  expect(versions.data.items.map((version) => version.sourceType)).toEqual([
+    "restore",
+    "user_save",
+  ]);
   expect(versions.data.items[0]?.parentVersionId).toBe(versions.data.items[1]?.id);
 
   await page.setViewportSize({ width: 390, height: 844 });
