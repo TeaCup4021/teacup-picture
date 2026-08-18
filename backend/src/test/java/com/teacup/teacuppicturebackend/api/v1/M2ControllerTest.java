@@ -1,8 +1,8 @@
 package com.teacup.teacuppicturebackend.api.v1;
 
 import com.teacup.teacuppicturebackend.ai.AiTaskService;
-import com.teacup.teacuppicturebackend.api.v1.model.M1Dtos;
 import com.teacup.teacuppicturebackend.api.v1.model.M2Dtos;
+import com.teacup.teacuppicturebackend.config.HttpRequestWrapperFilter;
 import com.teacup.teacuppicturebackend.model.entity.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -36,7 +37,8 @@ class M2ControllerTest {
         RequestIdFilter filter = new RequestIdFilter();
         filter.init(new MockFilterConfig());
         mockMvc = MockMvcBuilders.standaloneSetup(new M2Controller(auth, tasks))
-                .setControllerAdvice(new V1ExceptionHandler()).addFilters(filter).build();
+                .setControllerAdvice(new V1ExceptionHandler())
+                .addFilters(filter, new HttpRequestWrapperFilter()).build();
     }
 
     @Test
@@ -74,16 +76,19 @@ class M2ControllerTest {
                 List.of("generate"), List.of("1:1"), List.of("standard"), List.of("auto"),
                 List.of("png"), true, false, 1, true);
         M2Dtos.AiTaskView task = new M2Dtos.AiTaskView("9007199254740993", "generate", model,
-                "tea", "1:1", "standard", "auto", "png", null, "queued",
+                "一只白色茶杯，暖色光", "1:1", "standard", "auto", "png", null, "queued",
                 null, null, null, null, null,
                 false, false, Instant.now(), null, null, null);
-        when(tasks.create(eq(user), any(), eq("request-12345678")))
+        when(tasks.create(eq(user),
+                argThat(body -> "一只白色茶杯，暖色光".equals(body.prompt())),
+                eq("request-12345678")))
                 .thenReturn(new AiTaskService.CreateResult(task, true));
         mockMvc.perform(post("/api/v1/ai/tasks").header("Idempotency-Key", "request-12345678")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"type\":\"generate\",\"modelCode\":\"openai-image\",\"prompt\":\"tea\",\"ratio\":\"1:1\",\"quality\":\"standard\"}"))
+                        .content("{\"type\":\"generate\",\"modelCode\":\"openai-image\",\"prompt\":\"一只白色茶杯，暖色光\",\"ratio\":\"1:1\",\"quality\":\"standard\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.id").value("9007199254740993"))
+                .andExpect(jsonPath("$.data.prompt").value("一只白色茶杯，暖色光"))
                 .andExpect(jsonPath("$.data.outputFormat").value("png"));
     }
 

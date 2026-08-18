@@ -13,18 +13,45 @@ type ImageSource = CanvasImageSource | null;
  * The single renderer used for editor previews and exported version assets.
  * Fabric owns interaction; this renderer owns deterministic pixels.
  */
-export function renderEditorDocument(document: EditorDocument, image: ImageSource, outputScale = 1): HTMLCanvasElement {
-  const crop = document.crop ?? { x: 0, y: 0, width: document.canvas.width, height: document.canvas.height };
+export function renderEditorDocument(
+  document: EditorDocument,
+  image: ImageSource,
+  outputScale = 1,
+): HTMLCanvasElement {
+  const crop = document.crop ?? {
+    x: 0,
+    y: 0,
+    width: document.canvas.width,
+    height: document.canvas.height,
+  };
   const source = renderAdjustedImage(document, image, crop, outputScale);
   const context = source.getContext("2d");
   if (!context) return source;
 
+  const drawingSurface = documentForSize(source.width, source.height);
+  const drawingContext = drawingSurface.getContext("2d");
+  if (drawingContext) {
+    drawingContext.scale(outputScale, outputScale);
+    for (const layer of document.layers) {
+      if (layer.type === "drawing") drawLayer(drawingContext, layer, crop);
+    }
+    context.drawImage(drawingSurface, 0, 0);
+  }
+
   context.save();
   context.scale(outputScale, outputScale);
-  for (const layer of document.layers) drawLayer(context, layer, crop);
+  for (const layer of document.layers) {
+    if (layer.type === "text") drawLayer(context, layer, crop);
+  }
   context.restore();
 
-  const rotated = rotateAndScale(source, document.transform.rotation, document.transform.scale);
+  const rotated = rotateAndScale(
+    source,
+    document.transform.rotation,
+    document.transform.scale,
+    document.transform.flipX,
+    document.transform.flipY,
+  );
   return rotated;
 }
 
@@ -34,8 +61,16 @@ export function renderAdjustedImage(
   cropOverride?: { x: number; y: number; width: number; height: number } | null,
   outputScale = 1,
 ): HTMLCanvasElement {
-  const crop = cropOverride ?? { x: 0, y: 0, width: document.canvas.width, height: document.canvas.height };
-  const source = documentForSize(Math.max(1, Math.round(crop.width * outputScale)), Math.max(1, Math.round(crop.height * outputScale)));
+  const crop = cropOverride ?? {
+    x: 0,
+    y: 0,
+    width: document.canvas.width,
+    height: document.canvas.height,
+  };
+  const source = documentForSize(
+    Math.max(1, Math.round(crop.width * outputScale)),
+    Math.max(1, Math.round(crop.height * outputScale)),
+  );
   const context = source.getContext("2d", { willReadFrequently: true });
   if (!context) return source;
   context.clearRect(0, 0, source.width, source.height);
@@ -50,10 +85,14 @@ export async function exportEditorDocument(
 ): Promise<Blob> {
   const canvas = renderEditorDocument(document, image, 1);
   return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error("图片导出失败"));
-    }, mimeType, 0.95);
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("图片导出失败"));
+      },
+      mimeType,
+      0.95,
+    );
   });
 }
 
@@ -86,7 +125,10 @@ function drawAdjustedImage(
 }
 
 /** Pure color stage shared by browser rendering and deterministic unit tests. */
-export function applyColorAdjustments(data: Uint8ClampedArray, adjustments: EditorAdjustments): void {
+export function applyColorAdjustments(
+  data: Uint8ClampedArray,
+  adjustments: EditorAdjustments,
+): void {
   const exposure = Math.pow(2, adjustments.exposure / 100);
   const brightness = adjustments.brightness * 1.6;
   const enhance = adjustments.enhance / 100;
@@ -163,8 +205,17 @@ function applySharpness(context: CanvasRenderingContext2D, strength: number): vo
       const offset = (y * width + x) * 4;
       for (let channel = 0; channel < 3; channel += 1) {
         const center = sample(x, y, channel);
-        const neighbors = (sample(x - 1, y, channel) + sample(x + 1, y, channel) + sample(x, y - 1, channel) + sample(x, y + 1, channel)) / 4;
-        output.data[offset + channel] = clamp(center + sign * amount * (center - neighbors), 0, 255);
+        const neighbors =
+          (sample(x - 1, y, channel) +
+            sample(x + 1, y, channel) +
+            sample(x, y - 1, channel) +
+            sample(x, y + 1, channel)) /
+          4;
+        output.data[offset + channel] = clamp(
+          center + sign * amount * (center - neighbors),
+          0,
+          255,
+        );
       }
       output.data[offset + 3] = source.data[offset + 3] ?? 255;
     }
@@ -172,13 +223,21 @@ function applySharpness(context: CanvasRenderingContext2D, strength: number): vo
   context.putImageData(output, 0, 0);
 }
 
-function drawLayer(context: CanvasRenderingContext2D, layer: EditorLayer, crop: { x: number; y: number }): void {
+function drawLayer(
+  context: CanvasRenderingContext2D,
+  layer: EditorLayer,
+  crop: { x: number; y: number },
+): void {
   context.save();
   context.translate(layer.left - crop.x, layer.top - crop.y);
   context.rotate((layer.angle * Math.PI) / 180);
-  context.scale(layer.scaleX, layer.scaleY);
+  const bounds = layerBounds(layer);
+  if (layer.flipX) context.translate(bounds.width * layer.scaleX, 0);
+  if (layer.flipY) context.translate(0, bounds.height * layer.scaleY);
+  context.scale(layer.scaleX * (layer.flipX ? -1 : 1), layer.scaleY * (layer.flipY ? -1 : 1));
   if (layer.type === "text") drawText(context, layer);
-  else drawPath(context, layer.path, layer.color, layer.size, layer.opacity, layer.tool === "eraser");
+  else
+    drawPath(context, layer.path, layer.color, layer.size, layer.opacity, layer.tool === "eraser");
   context.restore();
 }
 
@@ -186,7 +245,9 @@ function drawText(context: CanvasRenderingContext2D, layer: TextLayer): void {
   context.font = `${layer.fontWeight} ${layer.fontSize}px ${layer.fontFamily}`;
   context.fillStyle = layer.color;
   context.textBaseline = "top";
-  context.fillText(layer.text, 0, 0);
+  const lines = wrapText(context, layer.text, layer.width);
+  const lineHeight = layer.fontSize * 1.16;
+  lines.forEach((line, index) => context.fillText(line, 0, index * lineHeight));
 }
 
 function drawPath(
@@ -209,8 +270,22 @@ function drawPath(
     const [type, first, second] = command;
     if (type === "M") context.moveTo(Number(first), Number(second));
     else if (type === "L") context.lineTo(Number(first), Number(second));
-    else if (type === "Q") context.quadraticCurveTo(Number(first), Number(second), Number(command[3]), Number(command[4]));
-    else if (type === "C") context.bezierCurveTo(Number(first), Number(second), Number(command[3]), Number(command[4]), Number(command[5]), Number(command[6]));
+    else if (type === "Q")
+      context.quadraticCurveTo(
+        Number(first),
+        Number(second),
+        Number(command[3]),
+        Number(command[4]),
+      );
+    else if (type === "C")
+      context.bezierCurveTo(
+        Number(first),
+        Number(second),
+        Number(command[3]),
+        Number(command[4]),
+        Number(command[5]),
+        Number(command[6]),
+      );
   }
   context.stroke();
 }
@@ -218,7 +293,14 @@ function drawPath(
 function drawVignette(context: CanvasRenderingContext2D, strength: number): void {
   const { width, height } = context.canvas;
   const radius = Math.hypot(width, height) / 2;
-  const gradient = context.createRadialGradient(width / 2, height / 2, radius * 0.35, width / 2, height / 2, radius);
+  const gradient = context.createRadialGradient(
+    width / 2,
+    height / 2,
+    radius * 0.35,
+    width / 2,
+    height / 2,
+    radius,
+  );
   if (strength > 0) {
     gradient.addColorStop(0, "rgba(0,0,0,0)");
     gradient.addColorStop(1, `rgba(0,0,0,${clamp(strength, 0, 1) * 0.55})`);
@@ -230,19 +312,78 @@ function drawVignette(context: CanvasRenderingContext2D, strength: number): void
   context.fillRect(0, 0, width, height);
 }
 
-function rotateAndScale(source: HTMLCanvasElement, rotation: number, scale: number): HTMLCanvasElement {
+function rotateAndScale(
+  source: HTMLCanvasElement,
+  rotation: number,
+  scale: number,
+  flipX: boolean,
+  flipY: boolean,
+): HTMLCanvasElement {
   const radians = (rotation * Math.PI) / 180;
   const output = documentForSize(
-    Math.max(1, Math.ceil((Math.abs(Math.cos(radians)) * source.width + Math.abs(Math.sin(radians)) * source.height) * scale)),
-    Math.max(1, Math.ceil((Math.abs(Math.sin(radians)) * source.width + Math.abs(Math.cos(radians)) * source.height) * scale)),
+    Math.max(
+      1,
+      Math.ceil(
+        (Math.abs(Math.cos(radians)) * source.width + Math.abs(Math.sin(radians)) * source.height) *
+          scale,
+      ),
+    ),
+    Math.max(
+      1,
+      Math.ceil(
+        (Math.abs(Math.sin(radians)) * source.width + Math.abs(Math.cos(radians)) * source.height) *
+          scale,
+      ),
+    ),
   );
   const context = output.getContext("2d");
   if (!context) return output;
   context.translate(output.width / 2, output.height / 2);
   context.rotate(radians);
-  context.scale(scale, scale);
+  context.scale(scale * (flipX ? -1 : 1), scale * (flipY ? -1 : 1));
   context.drawImage(source, -source.width / 2, -source.height / 2);
   return output;
+}
+
+function wrapText(context: CanvasRenderingContext2D, text: string, width: number): string[] {
+  const result: string[] = [];
+  for (const paragraph of text.split("\n")) {
+    if (!paragraph) {
+      result.push("");
+      continue;
+    }
+    let line = "";
+    for (const character of Array.from(paragraph)) {
+      const candidate = line + character;
+      if (line && context.measureText(candidate).width > width) {
+        result.push(line);
+        line = character;
+      } else {
+        line = candidate;
+      }
+    }
+    result.push(line);
+  }
+  return result.length ? result : [""];
+}
+
+function layerBounds(layer: EditorLayer): { width: number; height: number } {
+  if (layer.type === "text") {
+    const lineCount = Math.max(
+      1,
+      Math.ceil((Math.max(1, Array.from(layer.text).length) * layer.fontSize * 0.62) / layer.width),
+    );
+    return { width: layer.width, height: lineCount * layer.fontSize * 1.16 };
+  }
+  let maxX = 1;
+  let maxY = 1;
+  for (const command of layer.path) {
+    for (let index = 1; index < command.length; index += 2) {
+      maxX = Math.max(maxX, Number(command[index]) || 0);
+      maxY = Math.max(maxY, Number(command[index + 1]) || 0);
+    }
+  }
+  return { width: maxX + layer.size, height: maxY + layer.size };
 }
 
 function documentForSize(width: number, height: number): HTMLCanvasElement {

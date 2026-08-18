@@ -3,7 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { editorApi } from "@/features/editor/api/editor-api";
 import { m1Api } from "@/features/prototype";
-import type { EditorDocument, RestoreVersionResult } from "@/features/editor/model/types";
+import type {
+  EditorDocument,
+  EditorSaveMode,
+  PictureVersionDetail,
+} from "@/features/editor/model/types";
 
 export interface SaveDraftInput {
   document: EditorDocument;
@@ -12,6 +16,13 @@ export interface SaveDraftInput {
 
 export interface RestoreVersionInput {
   versionId: string;
+  expectedRevision: string | null;
+}
+
+export interface SaveEditorResultInput {
+  preview: Blob;
+  mode: EditorSaveMode;
+  name: string;
   expectedRevision: string | null;
 }
 
@@ -75,37 +86,47 @@ export function useSaveEditorDraft(pictureId: string) {
 export function useDeleteEditorDraft(pictureId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (expectedRevision: string | null) => editorApi.deleteDraft(pictureId, expectedRevision),
+    mutationFn: (expectedRevision: string | null) =>
+      editorApi.deleteDraft(pictureId, expectedRevision),
     onSuccess: () => queryClient.setQueryData(keys.draft(pictureId), null),
   });
 }
 
-export function useCreatePictureVersion(pictureId: string) {
+export function useSaveEditorResult(pictureId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { document: EditorDocument; preview: Blob; name: string; note: string }) =>
-      editorApi.createVersion(pictureId, input.document, input.preview, input.name, input.note),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.versions(pictureId) }),
+    mutationFn: (input: SaveEditorResultInput) =>
+      editorApi.saveEditorResult(
+        pictureId,
+        input.preview,
+        input.mode,
+        input.name,
+        input.expectedRevision,
+      ),
+    onSuccess: async () => {
+      queryClient.setQueryData(keys.draft(pictureId), null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.picture(pictureId) }),
+        queryClient.invalidateQueries({ queryKey: keys.baseImage(pictureId) }),
+        queryClient.invalidateQueries({ queryKey: keys.versions(pictureId) }),
+        queryClient.invalidateQueries({ queryKey: ["prototype"] }),
+      ]);
+    },
   });
 }
 
 export function useRestorePictureVersion(pictureId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: RestoreVersionInput): Promise<RestoreVersionResult> => {
-      const version = await editorApi.restoreVersion(
-        pictureId,
-        input.versionId,
-        input.expectedRevision,
-      );
-      const draft = await editorApi.getDraft(pictureId);
-      if (!draft) throw new Error("恢复版本后未读取到草稿");
-      return { version, draft };
-    },
-    onSuccess: (value) => {
-      queryClient.setQueryData(keys.draft(pictureId), value.draft);
-      return Promise.all([
+    mutationFn: (input: RestoreVersionInput): Promise<PictureVersionDetail> =>
+      editorApi.restoreVersion(pictureId, input.versionId, input.expectedRevision),
+    onSuccess: async () => {
+      queryClient.setQueryData(keys.draft(pictureId), null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.picture(pictureId) }),
+        queryClient.invalidateQueries({ queryKey: keys.baseImage(pictureId) }),
         queryClient.invalidateQueries({ queryKey: keys.versions(pictureId) }),
+        queryClient.invalidateQueries({ queryKey: ["prototype"] }),
       ]);
     },
   });

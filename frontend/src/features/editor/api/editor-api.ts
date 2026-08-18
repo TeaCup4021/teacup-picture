@@ -2,10 +2,13 @@ import { apiClient, unwrapApiResponse, type ApiEnvelope } from "@/api/client";
 import type {
   EditorDocument,
   EditorDraft,
+  EditorSaveMode,
+  EditorSaveResult,
   PictureVersionDetail,
   PictureVersionSummary,
   VersionListResponse,
 } from "@/features/editor/model/types";
+import { normalizeEditorDocument } from "@/features/editor/model/document";
 
 interface ApiEditorStateView {
   editorState: EditorDocument | null;
@@ -29,7 +32,11 @@ export const editorApi = {
   async getDraft(pictureId: string): Promise<EditorDraft | null> {
     const value = await get<ApiEditorStateView>(`/pictures/${pictureId}/editor-state`);
     return value.editorState && value.revision !== null
-      ? { editorState: value.editorState, updatedAt: value.updatedAt, revision: value.revision }
+      ? {
+          editorState: normalizeEditorDocument(value.editorState),
+          updatedAt: value.updatedAt,
+          revision: value.revision,
+        }
       : null;
   },
 
@@ -39,11 +46,15 @@ export const editorApi = {
     expectedRevision: string | null,
   ): Promise<EditorDraft> {
     const value = await put<ApiEditorStateView>(`/pictures/${pictureId}/editor-state`, {
-      editorState,
+      editorState: normalizeEditorDocument(editorState),
       expectedRevision,
     });
     if (value.revision === null) throw new Error("草稿保存响应缺少 revision");
-    return { editorState: value.editorState ?? editorState, updatedAt: value.updatedAt, revision: value.revision };
+    return {
+      editorState: normalizeEditorDocument(value.editorState ?? editorState),
+      updatedAt: value.updatedAt,
+      revision: value.revision,
+    };
   },
 
   async deleteDraft(pictureId: string, expectedRevision: string | null): Promise<void> {
@@ -58,7 +69,8 @@ export const editorApi = {
   },
 
   async getVersion(pictureId: string, versionId: string): Promise<PictureVersionDetail> {
-    return get<PictureVersionDetail>(`/pictures/${pictureId}/versions/${versionId}`);
+    const version = await get<PictureVersionDetail>(`/pictures/${pictureId}/versions/${versionId}`);
+    return { ...version, editorState: normalizeEditorDocument(version.editorState) };
   },
 
   async createVersion(
@@ -70,11 +82,38 @@ export const editorApi = {
   ): Promise<PictureVersionDetail> {
     const body = new FormData();
     body.append("file", preview, "preview.png");
-    body.append("editorState", JSON.stringify(editorState));
+    body.append("editorState", JSON.stringify(normalizeEditorDocument(editorState)));
     body.append("name", name);
     body.append("note", note);
     return unwrapApiResponse(
-      (await apiClient.post<ApiEnvelope<PictureVersionDetail>>(`/pictures/${pictureId}/versions`, body)).data,
+      (
+        await apiClient.post<ApiEnvelope<PictureVersionDetail>>(
+          `/pictures/${pictureId}/versions`,
+          body,
+        )
+      ).data,
+    );
+  },
+
+  async saveEditorResult(
+    pictureId: string,
+    preview: Blob,
+    mode: EditorSaveMode,
+    name: string,
+    expectedRevision: string | null,
+  ): Promise<EditorSaveResult> {
+    const body = new FormData();
+    body.append("file", preview, "edited.png");
+    body.append("mode", mode);
+    if (mode === "copy") body.append("name", name);
+    if (expectedRevision !== null) body.append("expectedRevision", expectedRevision);
+    return unwrapApiResponse(
+      (
+        await apiClient.post<ApiEnvelope<EditorSaveResult>>(
+          `/pictures/${pictureId}/editor-saves`,
+          body,
+        )
+      ).data,
     );
   },
 
@@ -83,20 +122,35 @@ export const editorApi = {
     versionId: string,
     expectedRevision: string | null,
   ): Promise<PictureVersionDetail> {
-    return post<PictureVersionDetail>(`/pictures/${pictureId}/versions/${versionId}/restore`, {
-      expectedRevision,
-    });
+    const version = await post<PictureVersionDetail>(
+      `/pictures/${pictureId}/versions/${versionId}/restore`,
+      {
+        expectedRevision,
+      },
+    );
+    return { ...version, editorState: normalizeEditorDocument(version.editorState) };
   },
 
   async loadPictureContent(pictureId: string): Promise<Blob> {
-    return (await apiClient.get<Blob>(`/pictures/${pictureId}/content?variant=original`, { responseType: "blob" })).data;
-  },
-
-  async loadVersionContent(pictureId: string, versionId: string, variant: "original" | "thumbnail"): Promise<Blob> {
     return (
-      await apiClient.get<Blob>(`/pictures/${pictureId}/versions/${versionId}/content?variant=${variant}`, {
+      await apiClient.get<Blob>(`/pictures/${pictureId}/content?variant=original`, {
         responseType: "blob",
       })
+    ).data;
+  },
+
+  async loadVersionContent(
+    pictureId: string,
+    versionId: string,
+    variant: "original" | "thumbnail",
+  ): Promise<Blob> {
+    return (
+      await apiClient.get<Blob>(
+        `/pictures/${pictureId}/versions/${versionId}/content?variant=${variant}`,
+        {
+          responseType: "blob",
+        },
+      )
     ).data;
   },
 };

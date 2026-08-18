@@ -1,8 +1,17 @@
 "use client";
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import {
+  Alert,
   App,
   Button,
   ColorPicker,
@@ -11,6 +20,7 @@ import {
   InputNumber,
   Modal,
   Result,
+  Segmented,
   Skeleton,
   Slider,
   Space,
@@ -22,27 +32,32 @@ import { useRouter } from "next/navigation";
 import { usePrototypeSession } from "@/features/prototype";
 import type { PrototypePicture } from "@/features/prototype";
 import {
-  useCreatePictureVersion,
   useDeleteEditorDraft,
   useEditorBaseImage,
   useEditorDraft,
   useEditorPicture,
   useEditorVersions,
   useRestorePictureVersion,
+  useSaveEditorResult,
   useSaveEditorDraft,
 } from "@/features/editor/model/queries";
-import type { RestoreVersionInput, SaveDraftInput } from "@/features/editor/model/queries";
+import type {
+  RestoreVersionInput,
+  SaveDraftInput,
+  SaveEditorResultInput,
+} from "@/features/editor/model/queries";
 import {
   cloneDocument,
   createEmptyDocument,
+  flipDocument,
   removeLayer,
   rotateDocument,
-  scaleDocument,
   setAdjustment,
   setCrop,
   updateLayer,
 } from "@/features/editor/model/document";
 import { exportEditorDocument } from "@/features/editor/model/render";
+import { createEditorHistory, editorHistoryReducer } from "@/features/editor/model/history";
 import { EditorCanvas } from "@/features/editor/ui/editor-canvas";
 import { EditorInspector } from "@/features/editor/ui/editor-inspector";
 import { EditorToolbar, EditorToolRail } from "@/features/editor/ui/editor-toolbar";
@@ -53,22 +68,16 @@ import type {
   EditorDocument,
   EditorDraft,
   EditorLayer,
+  EditorSaveMode,
+  EditorSaveResult,
   EditorTool,
   PictureVersionDetail,
   PictureVersionSummary,
-  RestoreVersionResult,
 } from "@/features/editor/model/types";
 
 interface EditorProps {
   pictureId: string;
 }
-
-type CreateVersionInput = {
-  document: EditorDocument;
-  preview: Blob;
-  name: string;
-  note: string;
-};
 
 type AdjustmentPreview = {
   key: AdjustmentKey;
@@ -83,7 +92,7 @@ export function Editor({ pictureId }: EditorProps) {
   const versions = useEditorVersions(pictureId, Boolean(picture.data));
   const saveDraft = useSaveEditorDraft(pictureId);
   const deleteDraft = useDeleteEditorDraft(pictureId);
-  const createVersion = useCreatePictureVersion(pictureId);
+  const saveEditorResult = useSaveEditorResult(pictureId);
   const restoreVersion = useRestorePictureVersion(pictureId);
 
   if (session.isLoading)
@@ -153,7 +162,7 @@ export function Editor({ pictureId }: EditorProps) {
       versionsError={versions.isError}
       saveDraft={saveDraft}
       deleteDraft={deleteDraft}
-      createVersion={createVersion}
+      saveEditorResult={saveEditorResult}
       restoreVersion={restoreVersion}
       onRetryVersions={() => void versions.refetch()}
     />
@@ -171,8 +180,8 @@ interface EditorWorkspaceProps {
   versionsError: boolean;
   saveDraft: UseMutationResult<EditorDraft, Error, SaveDraftInput>;
   deleteDraft: UseMutationResult<void, Error, string | null>;
-  createVersion: UseMutationResult<PictureVersionDetail, Error, CreateVersionInput>;
-  restoreVersion: UseMutationResult<RestoreVersionResult, Error, RestoreVersionInput>;
+  saveEditorResult: UseMutationResult<EditorSaveResult, Error, SaveEditorResultInput>;
+  restoreVersion: UseMutationResult<PictureVersionDetail, Error, RestoreVersionInput>;
   onRetryVersions: () => void;
 }
 
@@ -187,15 +196,19 @@ function EditorWorkspace({
   versionsError,
   saveDraft,
   deleteDraft,
-  createVersion,
+  saveEditorResult,
   restoreVersion,
   onRetryVersions,
 }: EditorWorkspaceProps) {
   const { message } = App.useApp();
   const router = useRouter();
-  const [document, setDocument] = useState<EditorDocument>(() => cloneDocument(initialDocument));
-  const [past, setPast] = useState<EditorDocument[]>([]);
-  const [future, setFuture] = useState<EditorDocument[]>([]);
+  const [history, dispatchHistory] = useReducer(
+    editorHistoryReducer,
+    initialDocument,
+    createEditorHistory,
+  );
+  const document = history.present;
+  const [viewZoom, setViewZoom] = useState(1);
   const [tool, setTool] = useState<EditorTool>("select");
   const [strokeColor, setStrokeColor] = useState("#3370ff");
   const [strokeSize, setStrokeSize] = useState(6);
@@ -204,15 +217,15 @@ function EditorWorkspace({
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [versionPanelOpen, setVersionPanelOpen] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
-  const [versionName, setVersionName] = useState("");
-  const [versionNote, setVersionNote] = useState("");
+  const [saveMode, setSaveMode] = useState<EditorSaveMode>("replace");
+  const [copyName, setCopyName] = useState(() => defaultCopyName(picture.title));
   const [saveState, setSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">(
     "idle",
   );
   const [exitModalOpen, setExitModalOpen] = useState(false);
   const [exitAction, setExitAction] = useState<"save" | "discard" | null>(null);
-  const [baseline, setBaseline] = useState<EditorDocument>(() => cloneDocument(initialDocument));
-  const [baselineHadDraft, setBaselineHadDraft] = useState(initialDraft !== null);
+  const [baseline] = useState<EditorDocument>(() => cloneDocument(initialDocument));
+  const [baselineHadDraft] = useState(initialDraft !== null);
   const [sessionTouched, setSessionTouched] = useState(false);
   const [adjustmentPreview, setAdjustmentPreview] = useState<AdjustmentPreview | null>(null);
   const effectiveDocument = useMemo(
@@ -304,17 +317,13 @@ function EditorWorkspace({
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [hasSessionChanges, saveState]);
 
-  const commit = useCallback(
-    (next: EditorDocument) => {
-      setAdjustmentPreview(null);
-      setSessionTouched(true);
-      setPast((items) => [...items.slice(-49), cloneDocument(document)]);
-      setFuture([]);
-      setDocument(cloneDocument(next));
-      setSaveState("dirty");
-    },
-    [document],
-  );
+  const commit = useCallback((next: EditorDocument) => {
+    setAdjustmentPreview(null);
+    setSessionTouched(true);
+    documentRef.current = cloneDocument(next);
+    dispatchHistory({ type: "commit", document: next });
+    setSaveState("dirty");
+  }, []);
 
   const selectedLayer = useMemo(
     () => document.layers.find((layer) => layer.id === selectedLayerId) ?? null,
@@ -322,26 +331,40 @@ function EditorWorkspace({
   );
 
   function undo() {
-    const previous = past[past.length - 1];
+    const previous = history.past[history.past.length - 1];
     if (!previous) return;
     setSessionTouched(true);
-    setPast((items) => items.slice(0, -1));
-    setFuture((items) => [cloneDocument(document), ...items]);
-    setDocument(cloneDocument(previous));
+    setAdjustmentPreview(null);
+    documentRef.current = cloneDocument(previous);
+    dispatchHistory({ type: "undo" });
     setSelectedLayerId(null);
     setSaveState("dirty");
   }
 
   function redo() {
-    const next = future[0];
+    const next = history.future[0];
     if (!next) return;
     setSessionTouched(true);
-    setFuture((items) => items.slice(1));
-    setPast((items) => [...items, cloneDocument(document)]);
-    setDocument(cloneDocument(next));
+    setAdjustmentPreview(null);
+    documentRef.current = cloneDocument(next);
+    dispatchHistory({ type: "redo" });
     setSelectedLayerId(null);
     setSaveState("dirty");
   }
+
+  useEffect(() => {
+    const handleHistoryShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== "z")
+        return;
+      const target = event.target as HTMLElement | null;
+      if (target?.matches("input, textarea, [contenteditable='true']")) return;
+      event.preventDefault();
+      if (event.shiftKey) redo();
+      else undo();
+    };
+    window.addEventListener("keydown", handleHistoryShortcut);
+    return () => window.removeEventListener("keydown", handleHistoryShortcut);
+  });
 
   function handleDocumentChange(next: EditorDocument) {
     if (JSON.stringify(next) === JSON.stringify(document)) return;
@@ -369,19 +392,6 @@ function EditorWorkspace({
   function handleLayerDelete(id: string) {
     commit(removeLayer(document, id));
     setSelectedLayerId(null);
-  }
-
-  function handleLayerMove(id: string, direction: "up" | "down") {
-    const index = document.layers.findIndex((layer) => layer.id === id);
-    const targetIndex = direction === "up" ? index + 1 : index - 1;
-    if (index < 0 || targetIndex < 0 || targetIndex >= document.layers.length) return;
-    const layers = [...document.layers];
-    const current = layers[index];
-    const target = layers[targetIndex];
-    if (!current || !target) return;
-    layers[index] = target;
-    layers[targetIndex] = current;
-    commit({ ...document, layers });
   }
 
   function handleCropApply(crop: CropRect) {
@@ -412,9 +422,19 @@ function EditorWorkspace({
     }
   }
 
-  async function handleSaveVersion() {
+  function openSaveDialog() {
+    setSaveMode("replace");
+    setCopyName(defaultCopyName(picture.title));
+    setSaveModalOpen(true);
+  }
+
+  async function handleSave() {
     if (!image) {
       message.error("原图尚未加载完成");
+      return;
+    }
+    if (saveMode === "copy" && !copyName.trim()) {
+      message.error("请输入新图片名称");
       return;
     }
     autosaveSuspendedRef.current = true;
@@ -422,22 +442,19 @@ function EditorWorkspace({
     try {
       await persistSnapshot(snapshot, true);
       const preview = await exportEditorDocument(snapshot, image, "image/png");
-      await createVersion.mutateAsync({
-        document: snapshot,
+      const result = await saveEditorResult.mutateAsync({
         preview,
-        name: versionName.trim(),
-        note: versionNote.trim(),
+        mode: saveMode,
+        name: copyName.trim(),
+        expectedRevision: revisionRef.current,
       });
-      setBaseline(cloneDocument(snapshot));
-      setBaselineHadDraft(true);
       setSessionTouched(false);
       setSaveState("saved");
-      message.success("已保存正式版本");
       setSaveModalOpen(false);
-      setVersionName("");
-      setVersionNote("");
+      message.success(saveMode === "replace" ? "已替换当前图片" : "已另存为新图片");
+      router.push(`/pictures/${result.pictureId}`);
     } catch (error) {
-      message.error(errorMessage(error, "版本保存失败"));
+      message.error(errorMessage(error, "图片保存失败"));
     } finally {
       autosaveSuspendedRef.current = false;
     }
@@ -447,23 +464,15 @@ function EditorWorkspace({
     autosaveSuspendedRef.current = true;
     try {
       await persistSnapshot(effectiveDocument, true);
-      const restored = await restoreVersion.mutateAsync({
+      await restoreVersion.mutateAsync({
         versionId,
         expectedRevision: revisionRef.current,
       });
-      const restoredDocument = cloneDocument(restored.draft.editorState);
-      revisionRef.current = restored.draft.revision;
-      lastSavedRef.current = cloneDocument(restoredDocument);
-      setBaseline(cloneDocument(restoredDocument));
-      setBaselineHadDraft(true);
       setSessionTouched(false);
-      setPast((items) => [...items.slice(-49), cloneDocument(document)]);
-      setFuture([]);
-      setDocument(restoredDocument);
-      setSelectedLayerId(null);
       setVersionPanelOpen(false);
       setSaveState("saved");
       message.success("已恢复为当前版本");
+      router.push(`/pictures/${picture.id}`);
     } catch (error) {
       message.error(errorMessage(error, "版本恢复失败"));
     } finally {
@@ -545,12 +554,14 @@ function EditorWorkspace({
           <Tooltip title="退出编辑">
             <Button
               className="editor-exit-button"
-              type="text"
+              type="default"
               icon={<ArrowLeftOutlined />}
               aria-label="退出编辑"
               loading={exitAction !== null}
               onClick={handleExit}
-            />
+            >
+              退出
+            </Button>
           </Tooltip>
           <span className="editor-brand-mark">茶</span>
           <div className="editor-title-copy">
@@ -559,14 +570,16 @@ function EditorWorkspace({
           </div>
         </div>
         <EditorToolbar
-          zoom={document.transform.scale}
-          canUndo={past.length > 0}
-          canRedo={future.length > 0}
+          zoom={viewZoom}
+          canUndo={history.past.length > 0}
+          canRedo={history.future.length > 0}
           onUndo={undo}
           onRedo={redo}
           onRotate={(delta) => commit(rotateDocument(document, delta))}
-          onZoom={(delta) => commit(scaleDocument(document, document.transform.scale + delta))}
-          onSaveVersion={() => setSaveModalOpen(true)}
+          onFlip={(axis) => commit(flipDocument(document, axis))}
+          onZoom={(delta) => setViewZoom((value) => Math.min(4, Math.max(0.25, value + delta)))}
+          onFitZoom={() => setViewZoom(1)}
+          onSave={openSaveDialog}
           onOpenVersions={() => setVersionPanelOpen(true)}
           onDownload={() => void handleDownload()}
         />
@@ -582,6 +595,7 @@ function EditorWorkspace({
           strokeSize={strokeSize}
           textColor={textColor}
           fontSize={fontSize}
+          viewZoom={viewZoom}
           selectedLayerId={selectedLayerId}
           onSelectLayer={setSelectedLayerId}
           onDocumentChange={handleDocumentChange}
@@ -640,14 +654,11 @@ function EditorWorkspace({
           ) : null}
           <EditorInspector
             adjustments={effectiveDocument.adjustments}
-            layers={document.layers}
             selectedLayer={selectedLayer}
             onAdjustmentPreview={handleAdjustmentPreview}
             onAdjustmentCommit={handleAdjustmentCommit}
-            onLayerSelect={setSelectedLayerId}
             onLayerChange={handleLayerChange}
             onLayerDelete={handleLayerDelete}
-            onLayerMove={handleLayerMove}
           />
         </aside>
       </div>
@@ -656,7 +667,6 @@ function EditorWorkspace({
         <Space size={8}>
           <span className="editor-status-dot" />
           {saveLabel}
-          <Typography.Text type="secondary">{document.layers.length} 个图层</Typography.Text>
         </Space>
       </div>
 
@@ -672,34 +682,47 @@ function EditorWorkspace({
       />
 
       <Modal
-        title="保存正式版本"
+        title="保存图片"
         open={saveModalOpen}
-        okText="保存版本"
+        okText="确认保存"
         cancelText="取消"
-        confirmLoading={createVersion.isPending}
+        confirmLoading={saveEditorResult.isPending}
+        closable={!saveEditorResult.isPending}
+        maskClosable={!saveEditorResult.isPending}
         onCancel={() => setSaveModalOpen(false)}
-        onOk={() => void handleSaveVersion()}
+        onOk={() => void handleSave()}
       >
         <Form layout="vertical">
-          <Form.Item label="版本名称" htmlFor="editor-version-name">
-            <Input
-              id="editor-version-name"
-              autoFocus
-              value={versionName}
-              onChange={(event) => setVersionName(event.target.value)}
-              placeholder="例如：春季宣传图"
-              maxLength={128}
+          <Form.Item label="保存方式">
+            <Segmented
+              block
+              options={[
+                { label: "替换当前图片", value: "replace" },
+                { label: "另存为新图片", value: "copy" },
+              ]}
+              value={saveMode}
+              onChange={(value) => setSaveMode(value as EditorSaveMode)}
             />
           </Form.Item>
-          <Form.Item label="版本说明" htmlFor="editor-version-note">
-            <Input.TextArea
-              id="editor-version-note"
-              value={versionNote}
-              onChange={(event) => setVersionNote(event.target.value)}
-              rows={3}
-              maxLength={512}
+          {saveMode === "replace" ? (
+            <Alert
+              type="warning"
+              showIcon
+              message="当前图片将被编辑结果替换"
+              description="系统会自动保留历史版本；如图片已公开或正在审核，将恢复为私有状态。"
             />
-          </Form.Item>
+          ) : (
+            <Form.Item label="新图片名称" htmlFor="editor-copy-name" required>
+              <Input
+                id="editor-copy-name"
+                autoFocus
+                value={copyName}
+                onChange={(event) => setCopyName(event.target.value)}
+                maxLength={128}
+                showCount
+              />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
 
@@ -757,6 +780,12 @@ function toolName(tool: EditorTool): string {
 
 function documentsEqual(first: EditorDocument, second: EditorDocument): boolean {
   return JSON.stringify(first) === JSON.stringify(second);
+}
+
+function defaultCopyName(sourceName: string): string {
+  const suffix = " - 副本";
+  const base = sourceName.trim() || "未命名图片";
+  return `${base.slice(0, 128 - suffix.length)}${suffix}`;
 }
 
 function errorMessage(error: unknown, fallback: string): string {

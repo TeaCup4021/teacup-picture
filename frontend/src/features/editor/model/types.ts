@@ -29,6 +29,8 @@ export interface DrawingLayer {
   top: number;
   scaleX: number;
   scaleY: number;
+  flipX: boolean;
+  flipY: boolean;
   angle: number;
 }
 
@@ -39,12 +41,15 @@ export interface TextLayer {
   left: number;
   top: number;
   fontSize: number;
+  width: number;
   color: string;
   fontFamily: string;
   fontWeight: string;
   angle: number;
   scaleX: number;
   scaleY: number;
+  flipX: boolean;
+  flipY: boolean;
 }
 
 export type EditorLayer = DrawingLayer | TextLayer;
@@ -67,8 +72,8 @@ export type AdjustmentKey =
 
 export type EditorAdjustments = Record<AdjustmentKey, number>;
 
-export interface EditorStateV2 {
-  schemaVersion: 2;
+export interface EditorStateV3 {
+  schemaVersion: 3;
   canvas: {
     width: number;
     height: number;
@@ -76,6 +81,8 @@ export interface EditorStateV2 {
   transform: {
     rotation: number;
     scale: number;
+    flipX: boolean;
+    flipY: boolean;
   };
   crop: CropRect | null;
   adjustments: EditorAdjustments;
@@ -83,7 +90,7 @@ export interface EditorStateV2 {
 }
 
 /** Domain name retained so API/query code remains readable during the migration. */
-export type EditorDocument = EditorStateV2;
+export type EditorDocument = EditorStateV3;
 
 export interface EditorDraft {
   editorState: EditorDocument;
@@ -91,9 +98,11 @@ export interface EditorDraft {
   revision: string;
 }
 
-export interface RestoreVersionResult {
-  version: PictureVersionDetail;
-  draft: EditorDraft;
+export type EditorSaveMode = "replace" | "copy";
+
+export interface EditorSaveResult {
+  mode: EditorSaveMode;
+  pictureId: string;
 }
 
 export interface EditorAuthor {
@@ -107,7 +116,7 @@ export interface PictureVersionSummary {
   versionNumber: number;
   name: string;
   note: string | null;
-  sourceType: "user_save" | "restore" | "ai_generate" | "ai_outpaint" | "team_confirm";
+  sourceType: "original" | "user_save" | "restore" | "ai_generate" | "ai_outpaint" | "team_confirm";
   parentVersionId: string | null;
   width: number;
   height: number;

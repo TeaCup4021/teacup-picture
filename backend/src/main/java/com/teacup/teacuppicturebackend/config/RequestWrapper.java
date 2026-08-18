@@ -1,49 +1,44 @@
 package com.teacup.teacuppicturebackend.config;
 
-import lombok.extern.slf4j.Slf4j;
-
-
 import javax.servlet.ReadListener;
 import javax.servlet.ServletInputStream;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletRequestWrapper;
-import java.io.*;
-
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 
 /**
  * HttpServletRequest包装类，用于缓存请求体内容
  */
-@Slf4j
 public class RequestWrapper extends HttpServletRequestWrapper {
 
-    private final String body;
+    private final byte[] body;
+    private final Charset charset;
 
-    public RequestWrapper(HttpServletRequest request) {
+    public RequestWrapper(HttpServletRequest request) throws IOException {
         super(request);
-        StringBuilder stringBuilder = new StringBuilder();
-        try (InputStream inputStream = request.getInputStream(); BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(inputStream))) {
-            char[] charBuffer = new char[128];
-            int bytesRead = -1;
-            while ((bytesRead = bufferedReader.read(charBuffer)) > 0) {
-                stringBuilder.append(charBuffer, 0, bytesRead);
-            }
-        } catch (IOException ignored) {
-        }
-        body = stringBuilder.toString();
+        body = request.getInputStream().readAllBytes();
+        charset = request.getCharacterEncoding() == null
+                ? StandardCharsets.UTF_8
+                : Charset.forName(request.getCharacterEncoding());
     }
 
     @Override
     public ServletInputStream getInputStream() throws IOException {
-        final ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(body.getBytes());
+        final ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(body);
         return new ServletInputStream() {
             @Override
             public boolean isFinished() {
-                return false;
+                return byteArrayInputStream.available() == 0;
             }
 
             @Override
             public boolean isReady() {
-                return false;
+                return true;
             }
 
             @Override
@@ -60,11 +55,11 @@ public class RequestWrapper extends HttpServletRequestWrapper {
 
     @Override
     public BufferedReader getReader() throws IOException {
-        return new BufferedReader(new InputStreamReader(this.getInputStream()));
+        return new BufferedReader(new InputStreamReader(this.getInputStream(), charset));
     }
 
     public String getBody() {
-        return this.body;
+        return new String(body, charset);
     }
 
 }

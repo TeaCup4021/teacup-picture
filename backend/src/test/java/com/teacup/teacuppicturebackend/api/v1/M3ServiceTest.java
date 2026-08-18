@@ -5,10 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.teacup.teacuppicturebackend.mapper.PictureDraftMapper;
 import com.teacup.teacuppicturebackend.mapper.PictureMapper;
 import com.teacup.teacuppicturebackend.mapper.PictureVersionMapper;
+import com.teacup.teacuppicturebackend.mapper.PublishRequestMapper;
+import com.teacup.teacuppicturebackend.mapper.SpaceMapper;
 import com.teacup.teacuppicturebackend.mapper.UserMapper;
 import com.teacup.teacuppicturebackend.model.entity.Picture;
 import com.teacup.teacuppicturebackend.model.entity.PictureDraft;
 import com.teacup.teacuppicturebackend.model.entity.PictureVersion;
+import com.teacup.teacuppicturebackend.model.entity.Space;
 import com.teacup.teacuppicturebackend.model.entity.User;
 import com.teacup.teacuppicturebackend.service.UserService;
 import com.teacup.teacuppicturebackend.storage.PictureAssetService;
@@ -31,9 +34,20 @@ class M3ServiceTest {
             "saturation":0,"vibrance":0,"temperature":0,"tint":0,"sharpness":0,"fade":0,"vignette":0,
             "enhance":0,"dehaze":0},"layers":[]}
             """;
+    private static final String V3_STATE = """
+            {"schemaVersion":3,"canvas":{"width":800,"height":600},
+            "transform":{"rotation":0,"scale":1,"flipX":true,"flipY":false},"crop":null,
+            "adjustments":{"exposure":0,"brightness":0,"contrast":0,"highlights":0,"shadows":0,
+            "saturation":0,"vibrance":0,"temperature":0,"tint":0,"sharpness":0,"fade":0,"vignette":0,
+            "enhance":0,"dehaze":0},"layers":[{"id":"text-1","type":"text","text":"文字","left":20,
+            "top":30,"fontSize":32,"width":240,"color":"#ffffff","fontFamily":"sans-serif","fontWeight":"600",
+            "angle":0,"scaleX":1,"scaleY":1,"flipX":false,"flipY":true}]}
+            """;
     private final PictureMapper pictures = mock(PictureMapper.class);
     private final PictureDraftMapper drafts = mock(PictureDraftMapper.class);
     private final PictureVersionMapper versions = mock(PictureVersionMapper.class);
+    private final PublishRequestMapper publishRequests = mock(PublishRequestMapper.class);
+    private final SpaceMapper spaces = mock(SpaceMapper.class);
     private final UserMapper users = mock(UserMapper.class);
     private final UserService userService = mock(UserService.class);
     private final PictureStorage storage = mock(PictureStorage.class);
@@ -42,10 +56,12 @@ class M3ServiceTest {
     private M3Service service;
     private User user;
     private Picture picture;
+    private Space space;
 
     @BeforeEach
     void setUp() {
-        service = new M3Service(pictures, drafts, versions, users, userService, storage, assets, objectMapper);
+        service = new M3Service(pictures, drafts, versions, publishRequests, spaces, users,
+                userService, storage, assets, objectMapper);
         user = new User();
         user.setId(11L);
         user.setUserName("编辑者");
@@ -54,8 +70,25 @@ class M3ServiceTest {
         picture.setUserId(11L);
         picture.setSpaceId(200L);
         picture.setIsDelete(0);
+        picture.setObjectKey("spaces/200/pictures/original.jpg");
+        picture.setThumbnailObjectKey("spaces/200/pictures/original-thumb.jpg");
+        picture.setContentType("image/jpeg");
+        picture.setPicSize(1_000L);
+        picture.setPicWidth(640);
+        picture.setPicHeight(480);
+        picture.setName("原图");
+        picture.setVisibility("private");
+        picture.setPublishStatus("not_requested");
+        space = new Space();
+        space.setId(200L);
+        space.setMaxSize(100_000L);
+        space.setMaxCount(100L);
+        space.setTotalSize(1_000L);
+        space.setTotalCount(1L);
+        space.setIsDelete(0);
         when(pictures.selectById(100L)).thenReturn(picture);
         when(pictures.lockPictureForUpdate(100L)).thenReturn(100L);
+        when(spaces.selectById(200L)).thenReturn(space);
         when(users.selectById(11L)).thenReturn(user);
         when(assets.versionContentUrl(eq(100L), anyLong(), any())).thenAnswer(invocation ->
                 "http://localhost/api/v1/pictures/100/versions/" + invocation.getArgument(1) + "/content?variant=" + invocation.getArgument(2));
@@ -74,7 +107,32 @@ class M3ServiceTest {
         assertNotNull(result.editorState());
         assertEquals(1L, result.revision());
         assertEquals(1, result.editorState().toString().length() > 0 ? 1 : 0);
+        assertEquals(3, objectMapper.valueToTree(result.editorState()).path("schemaVersion").intValue());
+        assertFalse(objectMapper.valueToTree(result.editorState()).path("transform").path("flipX").booleanValue());
         verify(drafts).insert(any(PictureDraft.class));
+    }
+
+    @Test
+    void saveDraftAcceptsV3TextWidthAndExplicitFlips() throws Exception {
+        when(drafts.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(drafts.insert(any(PictureDraft.class))).thenReturn(1);
+
+        var result = service.saveDraft(user, 100L, objectMapper.readTree(V3_STATE), null);
+        var state = objectMapper.valueToTree(result.editorState());
+
+        assertTrue(state.path("transform").path("flipX").booleanValue());
+        assertEquals(240, state.path("layers").get(0).path("width").intValue());
+        assertTrue(state.path("layers").get(0).path("flipY").booleanValue());
+    }
+
+    @Test
+    void saveDraftRejectsZeroLayerScale() throws Exception {
+        var state = (com.fasterxml.jackson.databind.node.ObjectNode) objectMapper.readTree(V3_STATE);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) state.path("layers").get(0)).put("scaleX", 0);
+
+        assertEquals(40000, assertThrows(V1Exception.class,
+                () -> service.saveDraft(user, 100L, state, null)).getCode());
+        verify(drafts, never()).insert(any(PictureDraft.class));
     }
 
     @Test
@@ -178,6 +236,115 @@ class M3ServiceTest {
     }
 
     @Test
+    void replaceCurrentPictureCreatesSnapshotsAndResetsPublication() {
+        MultipartFile image = mock(MultipartFile.class);
+        when(image.isEmpty()).thenReturn(false);
+        when(versions.selectMaxVersionNumber(100L)).thenReturn(0);
+        PictureDraft draft = new PictureDraft();
+        draft.setId(9L);
+        draft.setRevision(5L);
+        when(drafts.selectOne(any(Wrapper.class))).thenReturn(draft);
+        PictureStorage.StoredPicture stored = new PictureStorage.StoredPicture(
+                "spaces/200/pictures/result.png", "spaces/200/pictures/result-thumb.jpg",
+                1_500L, 800, 600, "png", "image/png", "result-sha");
+        when(storage.store(image, 200L)).thenReturn(stored);
+        picture.setVisibility("public");
+        picture.setPublishStatus("approved");
+        picture.setReviewStatus(1);
+
+        var result = service.saveEditorResult(user, 100L, image, "replace", null, 5L);
+
+        assertEquals("replace", result.mode());
+        assertEquals("100", result.pictureId());
+        assertEquals("spaces/200/pictures/result.png", picture.getObjectKey());
+        assertEquals("private", picture.getVisibility());
+        assertEquals("not_requested", picture.getPublishStatus());
+        assertEquals(0, picture.getReviewStatus());
+        verify(versions, times(2)).insert(any(PictureVersion.class));
+        verify(pictures).updateById(picture);
+        verify(publishRequests).update(isNull(), any(Wrapper.class));
+        verify(drafts).deleteById(9L);
+        verify(spaces).update(isNull(), any(Wrapper.class));
+    }
+
+    @Test
+    void saveAsCopyCreatesPrivatePictureAndKeepsOriginalAsset() {
+        MultipartFile image = mock(MultipartFile.class);
+        when(image.isEmpty()).thenReturn(false);
+        when(drafts.selectOne(any(Wrapper.class))).thenReturn(null);
+        PictureStorage.StoredPicture stored = new PictureStorage.StoredPicture(
+                "spaces/200/pictures/copy.png", "spaces/200/pictures/copy-thumb.jpg",
+                1_500L, 800, 600, "png", "image/png", "copy-sha");
+        when(storage.store(image, 200L)).thenReturn(stored);
+        picture.setIntroduction("原图简介");
+        picture.setCategory("宣传图");
+        picture.setTags("[\"茶杯\",\"春季\"]");
+        var captured = org.mockito.ArgumentCaptor.forClass(Picture.class);
+
+        var result = service.saveEditorResult(user, 100L, image, "copy", "新的图片", null);
+
+        verify(pictures).insert(captured.capture());
+        Picture copy = captured.getValue();
+        assertEquals("copy", result.mode());
+        assertEquals(copy.getId().toString(), result.pictureId());
+        assertEquals("新的图片", copy.getName());
+        assertEquals("spaces/200/pictures/copy.png", copy.getObjectKey());
+        assertEquals("private", copy.getVisibility());
+        assertEquals("not_requested", copy.getPublishStatus());
+        assertEquals("原图简介", copy.getIntroduction());
+        assertEquals("宣传图", copy.getCategory());
+        assertEquals("[\"茶杯\",\"春季\"]", copy.getTags());
+        assertEquals("spaces/200/pictures/original.jpg", picture.getObjectKey());
+        verify(spaces).update(isNull(), any(Wrapper.class));
+    }
+
+    @Test
+    void saveEditorResultRejectsInvalidModeBeforeStoring() {
+        MultipartFile image = mock(MultipartFile.class);
+        when(image.isEmpty()).thenReturn(false);
+
+        assertEquals(40000, assertThrows(V1Exception.class,
+                () -> service.saveEditorResult(user, 100L, image, "invalid", null, null)).getCode());
+
+        verify(storage, never()).store(any(), anyLong());
+    }
+
+    @Test
+    void saveEditorResultRejectsStaleRevisionBeforeStoring() {
+        MultipartFile image = mock(MultipartFile.class);
+        when(image.isEmpty()).thenReturn(false);
+        PictureDraft current = new PictureDraft();
+        current.setId(9L);
+        current.setRevision(5L);
+        when(drafts.selectOne(any(Wrapper.class))).thenReturn(current);
+
+        assertEquals(40901, assertThrows(V1Exception.class,
+                () -> service.saveEditorResult(user, 100L, image, "replace", null, 4L)).getCode());
+
+        verify(storage, never()).store(any(), anyLong());
+    }
+
+    @Test
+    void replaceCompensatesStoredFilesWhenSpaceCapacityIsExceeded() {
+        MultipartFile image = mock(MultipartFile.class);
+        when(image.isEmpty()).thenReturn(false);
+        when(drafts.selectOne(any(Wrapper.class))).thenReturn(null);
+        space.setMaxSize(1_100L);
+        PictureStorage.StoredPicture stored = new PictureStorage.StoredPicture(
+                "spaces/200/pictures/large.png", "spaces/200/pictures/large-thumb.jpg",
+                1_500L, 800, 600, "png", "image/png", "large-sha");
+        when(storage.store(image, 200L)).thenReturn(stored);
+
+        assertEquals(40901, assertThrows(V1Exception.class,
+                () -> service.saveEditorResult(user, 100L, image, "replace", null, null)).getCode());
+
+        verify(storage).delete("spaces/200/pictures/large.png");
+        verify(storage).delete("spaces/200/pictures/large-thumb.jpg");
+        verify(versions, never()).insert(any(PictureVersion.class));
+        verify(pictures, never()).updateById(any(Picture.class));
+    }
+
+    @Test
     void restoreVersionCopiesStateAndBumpsNumber() {
         PictureVersion source = new PictureVersion();
         source.setId(51L);
@@ -199,10 +366,6 @@ class M3ServiceTest {
             return 1;
         });
         when(drafts.selectOne(any(Wrapper.class))).thenReturn(null);
-        when(drafts.insert(any(PictureDraft.class))).thenAnswer(invocation -> {
-            ((PictureDraft) invocation.getArgument(0)).setId(1L);
-            return 1;
-        });
 
         var result = service.restoreVersion(user, 100L, 51L, null);
 
@@ -210,7 +373,8 @@ class M3ServiceTest {
         assertEquals(4, result.versionNumber());
         assertEquals("restore", result.sourceType());
         assertEquals("51", result.parentVersionId());
-        verify(drafts).insert(any(PictureDraft.class));
+        verify(pictures).updateById(picture);
+        verify(drafts, never()).insert(any(PictureDraft.class));
     }
 
     @Test

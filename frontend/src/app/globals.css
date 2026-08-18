@@ -1547,6 +1547,7 @@ select {
   display: grid;
   height: 100dvh;
   min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 64px minmax(0, 1fr);
   overflow: hidden;
   background: #0d111a;
@@ -1571,17 +1572,22 @@ select {
   min-width: 180px;
 }
 
-.editor-exit-button {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  color: #c6d0df;
+.editor-header .editor-exit-button.ant-btn {
+  width: auto;
+  min-width: 72px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-color: #64748b;
+  background: #263247;
+  color: #fff;
+  font-weight: 600;
 }
 
-.editor-exit-button:hover,
-.editor-exit-button:focus-visible {
+.editor-header .editor-exit-button.ant-btn:hover,
+.editor-header .editor-exit-button.ant-btn:focus-visible {
+  border-color: #8ba0bf !important;
   color: #fff !important;
-  background: #25324a !important;
+  background: #33435e !important;
 }
 
 .editor-brand-mark {
@@ -1676,9 +1682,13 @@ select {
   font-size: 12px;
 }
 
-.editor-zoom-control span {
-  min-width: 42px;
+.editor-zoom-control .ant-btn {
+  min-width: 76px;
   text-align: center;
+}
+
+.editor-flip-vertical .anticon {
+  transform: rotate(90deg);
 }
 
 .editor-toolbar-spacer {
@@ -1745,22 +1755,74 @@ select {
   background: #284e91;
 }
 
+.editor-tool-rail .editor-eraser-tool.is-active,
+.editor-tool-rail .editor-eraser-tool.is-active:hover,
+.editor-tool-rail .editor-eraser-tool.is-active:focus-visible {
+  color: #f4f6f8;
+  background: #515b69;
+}
+
+.editor-eraser-icon {
+  position: relative;
+  display: inline-block;
+  width: 17px;
+  height: 11px;
+  border: 2px solid currentcolor;
+  border-radius: 2px;
+  transform: rotate(-35deg);
+}
+
+.editor-eraser-icon::after {
+  position: absolute;
+  top: -2px;
+  right: 4px;
+  width: 2px;
+  height: 11px;
+  background: currentcolor;
+  content: "";
+}
+
 .editor-canvas-stage {
   position: relative;
-  display: grid;
+  display: flex;
   min-width: 0;
   min-height: 0;
-  place-items: center;
-  overflow: hidden;
+  align-items: flex-start;
+  justify-content: flex-start;
+  overflow: auto;
   padding: 32px;
   background-color: #0b0f17;
-  background-image: linear-gradient(45deg, #121a27 25%, transparent 25%), linear-gradient(-45deg, #121a27 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #121a27 75%), linear-gradient(-45deg, transparent 75%, #121a27 75%);
-  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  background-image:
+    linear-gradient(45deg, #121a27 25%, transparent 25%),
+    linear-gradient(-45deg, #121a27 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #121a27 75%),
+    linear-gradient(-45deg, transparent 75%, #121a27 75%);
+  background-position:
+    0 0,
+    0 12px,
+    12px -12px,
+    -12px 0;
   background-size: 24px 24px;
+}
+
+.editor-canvas-stack {
+  position: relative;
+  flex: 0 0 auto;
+  margin: auto;
+}
+
+.editor-base-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .editor-canvas-stage .canvas-container {
   position: relative !important;
+  z-index: 1;
   flex: 0 0 auto;
   max-width: 100%;
   max-height: 100%;
@@ -1774,11 +1836,26 @@ select {
 }
 
 .editor-canvas-stage .lower-canvas.editor-canvas {
-  background: #fff;
+  background: transparent;
 }
 
 .editor-canvas-stage .upper-canvas.editor-canvas {
   background: transparent;
+}
+
+.editor-canvas-stage.is-erasing .upper-canvas.editor-canvas {
+  cursor: none !important;
+}
+
+.editor-eraser-cursor {
+  position: absolute;
+  z-index: 4;
+  border: 1px solid #d2d7de;
+  border-radius: 50%;
+  background: rgb(142 151 163 / 28%);
+  box-shadow: 0 0 0 1px rgb(33 39 48 / 45%);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
 }
 
 .editor-canvas-empty {
@@ -1901,7 +1978,7 @@ select {
 
 .editor-adjustments {
   display: grid;
-  gap: 16px;
+  gap: 24px;
   padding-top: 12px;
 }
 
@@ -1932,52 +2009,29 @@ select {
   box-shadow: 0 0 0 2px #3370ff;
 }
 
-.editor-layer-list {
-  padding-top: 10px;
+.editor-adjustment-row .ant-slider .ant-slider-mark-text {
+  color: #9aabc0 !important;
 }
 
-.editor-layer-item {
-  min-height: 56px;
-  margin-bottom: 6px;
-  padding: 8px 8px 8px 10px !important;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.editor-layer-item:hover,
-.editor-layer-item.is-selected {
-  border-color: #34558f;
-  background: #1d2b43;
-}
-
-.editor-layer-item .ant-list-item-meta-title {
-  overflow: hidden;
-  margin-bottom: 2px;
-  color: #e2eaf5;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.editor-layer-item .ant-list-item-meta-description {
-  color: #8190a5;
-  font-size: 11px;
-}
-
-.editor-layer-icon {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 6px;
-  background: #26344c;
-  color: #8eb1ff;
+.editor-adjustment-row .ant-slider .ant-slider-mark-text-active {
+  color: #dce5f1 !important;
 }
 
 .editor-text-properties {
   display: grid;
   gap: 14px;
   padding-top: 14px;
+}
+
+.editor-layer-flips {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.editor-layer-flips .ant-btn {
+  min-width: 0;
+  padding-inline: 8px;
 }
 
 .editor-text-properties label {
@@ -2010,6 +2064,23 @@ select {
 
 .editor-mobile-status {
   display: none;
+}
+
+@media (max-width: 1200px) {
+  .editor-header-title {
+    width: 280px;
+    min-width: 0;
+    flex: 0 0 280px;
+  }
+
+  .editor-header-actions .ant-btn {
+    width: 40px;
+    padding-inline: 0;
+  }
+
+  .editor-header-actions .ant-btn > span:not(.ant-btn-icon) {
+    display: none;
+  }
 }
 
 @media (max-width: 980px) {
@@ -2048,7 +2119,9 @@ select {
   }
 
   .editor-header-title {
+    box-sizing: border-box;
     width: 100%;
+    flex: 0 1 100%;
     padding-right: 84px;
   }
 

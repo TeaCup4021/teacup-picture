@@ -2,9 +2,9 @@
 
 import { CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import { Button, Space, Tooltip } from "antd";
-import { Canvas, FabricImage, IText, Path, PencilBrush, Rect } from "fabric";
+import { Canvas, Path, PencilBrush, Rect, Textbox } from "fabric";
 import { useEffect, useRef, useState } from "react";
-import { normalizeCrop } from "@/features/editor/model/document";
+import { normalizeCrop, normalizeEditorDocument } from "@/features/editor/model/document";
 import { calculateEditorPreviewScale } from "@/features/editor/model/preview";
 import { renderAdjustedImage } from "@/features/editor/model/render";
 import type {
@@ -23,6 +23,7 @@ interface EditorCanvasProps {
   strokeSize: number;
   textColor: string;
   fontSize: number;
+  viewZoom: number;
   selectedLayerId: string | null;
   onSelectLayer: (id: string | null) => void;
   onDocumentChange: (document: EditorDocument) => void;
@@ -31,7 +32,7 @@ interface EditorCanvasProps {
 }
 
 type FabricCanvasObject = {
-  kind?: "base" | "layer" | "crop";
+  kind?: "layer" | "crop";
   layerId?: string;
   layerType?: "text" | "drawing";
   drawingTool?: "pen" | "marker" | "eraser";
@@ -51,6 +52,7 @@ export function EditorCanvas({
   strokeSize,
   textColor,
   fontSize,
+  viewZoom,
   selectedLayerId,
   onSelectLayer,
   onDocumentChange,
@@ -58,7 +60,9 @@ export function EditorCanvas({
   onCropCancel,
 }: EditorCanvasProps) {
   const elementRef = useRef<HTMLCanvasElement | null>(null);
+  const baseElementRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const stackRef = useRef<HTMLDivElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
   const applyingRef = useRef(false);
   const renderStateRef = useRef<CanvasRenderState | null>(null);
@@ -71,7 +75,9 @@ export function EditorCanvas({
   const textColorRef = useRef(textColor);
   const fontSizeRef = useRef(fontSize);
   const selectedLayerIdRef = useRef(selectedLayerId);
+  const viewZoomRef = useRef(viewZoom);
   const [draftCrop, setDraftCrop] = useState<CropRect | null>(null);
+  const [eraserCursor, setEraserCursor] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     onDocumentChangeRef.current = onDocumentChange;
@@ -81,7 +87,17 @@ export function EditorCanvas({
     textColorRef.current = textColor;
     fontSizeRef.current = fontSize;
     selectedLayerIdRef.current = selectedLayerId;
-  }, [document, fontSize, onDocumentChange, onSelectLayer, selectedLayerId, textColor, tool]);
+    viewZoomRef.current = viewZoom;
+  }, [
+    document,
+    fontSize,
+    onDocumentChange,
+    onSelectLayer,
+    selectedLayerId,
+    textColor,
+    tool,
+    viewZoom,
+  ]);
 
   useEffect(() => {
     const element = elementRef.current;
@@ -94,8 +110,9 @@ export function EditorCanvas({
       enableRetinaScaling: false,
     });
     fabricRef.current = canvas;
-    let textCommitTimer: number | null = null;
-    const resizeObserver = new ResizeObserver(() => fitCanvasToStage(canvas, stageRef.current));
+    const resizeObserver = new ResizeObserver(() =>
+      fitCanvasToStage(canvas, stageRef.current, stackRef.current, viewZoomRef.current),
+    );
     if (stageRef.current) resizeObserver.observe(stageRef.current);
 
     const emitDocument = () => {
@@ -103,16 +120,6 @@ export function EditorCanvas({
       onDocumentChangeRef.current(
         serializeCanvas(canvas, documentRef.current, cropDraftRef.current),
       );
-    };
-
-    const scheduleTextDocument = (delay: number) => {
-      if (applyingRef.current) return;
-      const next = serializeCanvas(canvas, documentRef.current, cropDraftRef.current);
-      if (textCommitTimer !== null) window.clearTimeout(textCommitTimer);
-      textCommitTimer = window.setTimeout(() => {
-        textCommitTimer = null;
-        onDocumentChangeRef.current(next);
-      }, delay);
     };
 
     canvas.on("selection:created", ({ selected }) => {
@@ -141,8 +148,7 @@ export function EditorCanvas({
       }
       emitDocument();
     });
-    canvas.on("text:changed", () => scheduleTextDocument(400));
-    canvas.on("text:editing:exited", () => scheduleTextDocument(0));
+    canvas.on("text:editing:exited", emitDocument);
     canvas.on("path:created", (event) => {
       const path = event.path as FabricCanvasObject & {
         set: (key: string, value: unknown) => void;
@@ -166,14 +172,33 @@ export function EditorCanvas({
       const target = event.target as FabricCanvasObject | undefined;
       if (target?.kind === "layer") return;
       const point = canvas.getScenePoint(event.e);
-      const text = new IText("输入文字", {
+      const text = new Textbox("输入文字", {
         left: point.x,
         top: point.y,
+        width: Math.min(320, Math.max(120, documentRef.current.canvas.width - point.x)),
         fill: textColorRef.current,
         fontSize: fontSizeRef.current,
         fontFamily: "Inter, PingFang SC, Microsoft YaHei, sans-serif",
         fontWeight: "600",
         padding: 8,
+        borderColor: "#3370ff",
+        cornerColor: "#ffffff",
+        cornerStrokeColor: "#3370ff",
+        cornerSize: 12,
+        transparentCorners: false,
+        lockScalingFlip: true,
+        minScaleLimit: 0.01,
+      });
+      text.setControlsVisibility({
+        tl: false,
+        tr: false,
+        bl: false,
+        br: false,
+        mt: false,
+        mb: false,
+        ml: true,
+        mr: true,
+        mtr: true,
       });
       const metadata = text as unknown as FabricCanvasObject & {
         set: (key: string, value: unknown) => void;
@@ -185,10 +210,10 @@ export function EditorCanvas({
       canvas.setActiveObject(text);
       text.enterEditing();
       text.selectAll();
+      canvas.requestRenderAll();
     });
 
     return () => {
-      if (textCommitTimer !== null) window.clearTimeout(textCommitTimer);
       if (previewFrameRef.current !== null) window.cancelAnimationFrame(previewFrameRef.current);
       resizeObserver.disconnect();
       fabricRef.current = null;
@@ -200,13 +225,18 @@ export function EditorCanvas({
     const canvas = fabricRef.current;
     if (!canvas) return;
     const previous = renderStateRef.current;
+    const active = canvas.getActiveObject();
+    if (active instanceof Textbox && active.isEditing && previous && previous.tool !== tool) {
+      active.exitEditing();
+      return;
+    }
     renderStateRef.current = { document, image, tool };
 
     if (isAdjustmentOnlyUpdate(previous, document, image, tool)) {
       if (previewFrameRef.current !== null) window.cancelAnimationFrame(previewFrameRef.current);
       previewFrameRef.current = window.requestAnimationFrame(() => {
         previewFrameRef.current = null;
-        updateAdjustedBase(canvas, document, image, tool, stageRef.current);
+        updateAdjustedBase(canvas, baseElementRef.current, document, image, tool, stageRef.current);
       });
       return;
     }
@@ -217,7 +247,17 @@ export function EditorCanvas({
     }
     applyingRef.current = true;
     try {
-      rebuildCanvas(canvas, document, image, tool, cropDraftRef, stageRef.current);
+      rebuildCanvas(
+        canvas,
+        baseElementRef.current,
+        document,
+        image,
+        tool,
+        cropDraftRef,
+        stageRef.current,
+        stackRef.current,
+        viewZoomRef.current,
+      );
       restoreSelection(canvas, selectedLayerIdRef.current);
       setDraftCrop(cropDraftRef.current);
     } finally {
@@ -233,13 +273,13 @@ export function EditorCanvas({
     if (canvas.isDrawingMode) {
       const brush = new PencilBrush(canvas);
       brush.width = strokeSize;
-      brush.color = strokeColor;
+      brush.color = tool === "eraser" ? "#aeb6c3" : strokeColor;
       brush.decimate = 0.5;
       canvas.freeDrawingBrush = brush;
     }
     canvas.getObjects().forEach((object) => {
       const metadata = object as unknown as FabricCanvasObject;
-      if (metadata.kind === "base" || metadata.kind === "crop") return;
+      if (metadata.kind === "crop") return;
       object.selectable = tool === "select";
       object.evented = tool === "select";
     });
@@ -263,11 +303,44 @@ export function EditorCanvas({
     }
   }, [selectedLayerId]);
 
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    fitCanvasToStage(canvas, stageRef.current, stackRef.current, viewZoom);
+  }, [viewZoom]);
+
   const cropMode = tool === "crop";
   return (
-    <div ref={stageRef} className="editor-canvas-stage">
-      <canvas ref={elementRef} className="editor-canvas" aria-label="图片编辑器画布" />
+    <div
+      ref={stageRef}
+      className={tool === "eraser" ? "editor-canvas-stage is-erasing" : "editor-canvas-stage"}
+      onPointerMove={(event) => {
+        if (tool !== "eraser") return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        setEraserCursor({
+          x: event.clientX - bounds.left + event.currentTarget.scrollLeft,
+          y: event.clientY - bounds.top + event.currentTarget.scrollTop,
+        });
+      }}
+      onPointerLeave={() => setEraserCursor(null)}
+    >
+      <div ref={stackRef} className="editor-canvas-stack">
+        <canvas ref={baseElementRef} className="editor-base-canvas" aria-hidden="true" />
+        <canvas ref={elementRef} className="editor-canvas" aria-label="图片编辑器画布" />
+      </div>
       {!image ? <span className="editor-canvas-empty">正在加载原图…</span> : null}
+      {tool === "eraser" && eraserCursor ? (
+        <span
+          className="editor-eraser-cursor"
+          aria-hidden="true"
+          style={{
+            left: eraserCursor.x,
+            top: eraserCursor.y,
+            width: Math.max(12, Math.min(80, strokeSize * viewZoom)),
+            height: Math.max(12, Math.min(80, strokeSize * viewZoom)),
+          }}
+        />
+      ) : null}
       {cropMode && draftCrop ? (
         <div className="editor-crop-actions">
           <Space size={6}>
@@ -296,42 +369,30 @@ export function EditorCanvas({
 
 function rebuildCanvas(
   canvas: Canvas,
+  baseCanvas: HTMLCanvasElement | null,
   document: EditorDocument,
   image: HTMLImageElement | null,
   tool: EditorTool,
   cropDraftRef: { current: CropRect | null },
   stage: HTMLDivElement | null,
+  stack: HTMLDivElement | null,
+  viewZoom: number,
 ): void {
   if (tool !== "crop") cropDraftRef.current = null;
   const geometry = previewGeometry(document, tool, stage);
-  const { outputWidth, outputHeight, previewScale, rotationRadians, viewCrop, zoom } = geometry;
+  const { outputWidth, outputHeight, previewScale, viewCrop } = geometry;
   canvas.clear();
-  canvas.setDimensions({
-    width: Math.max(1, Math.ceil(outputWidth * previewScale)),
-    height: Math.max(1, Math.ceil(outputHeight * previewScale)),
-  });
-  const background = renderAdjustedImage(document, image, viewCrop, previewScale);
-  if (image) {
-    const base = new FabricImage(background);
-    const metadata = base as unknown as FabricCanvasObject;
-    metadata.kind = "base";
-    base.set({
-      left: 0,
-      top: 0,
-      originX: "left",
-      originY: "top",
-      scaleX: 1 / previewScale,
-      scaleY: 1 / previewScale,
-      selectable: false,
-      evented: false,
-    });
-    canvas.add(base);
-    canvas.sendObjectToBack(base);
-  }
+  const canvasWidth = Math.max(1, Math.ceil(outputWidth * previewScale));
+  const canvasHeight = Math.max(1, Math.ceil(outputHeight * previewScale));
+  canvas.setDimensions({ width: canvasWidth, height: canvasHeight });
 
   const offsetX = viewCrop.x;
   const offsetY = viewCrop.y;
-  for (const layer of document.layers) {
+  const orderedLayers = [
+    ...document.layers.filter((layer) => layer.type === "drawing"),
+    ...document.layers.filter((layer) => layer.type === "text"),
+  ];
+  for (const layer of orderedLayers) {
     const object = createFabricLayer(layer, offsetX, offsetY);
     if (!object) continue;
     canvas.add(object);
@@ -366,41 +427,80 @@ function rebuildCanvas(
     canvas.setActiveObject(overlay);
   }
 
-  const cosine = Math.cos(rotationRadians) * zoom;
-  const sine = Math.sin(rotationRadians) * zoom;
-  const translateX = outputWidth / 2 - (cosine * viewCrop.width) / 2 + (sine * viewCrop.height) / 2;
-  const translateY =
-    outputHeight / 2 - (sine * viewCrop.width) / 2 - (cosine * viewCrop.height) / 2;
-  canvas.setViewportTransform([
-    cosine * previewScale,
-    sine * previewScale,
-    -sine * previewScale,
-    cosine * previewScale,
-    translateX * previewScale,
-    translateY * previewScale,
-  ]);
-  fitCanvasToStage(canvas, stage);
+  const transform = viewportTransform(document, geometry);
+  canvas.setViewportTransform(transform);
+  drawBaseCanvas(baseCanvas, document, image, geometry, transform, canvasWidth, canvasHeight);
+  fitCanvasToStage(canvas, stage, stack, viewZoom);
   canvas.requestRenderAll();
 }
 
 function updateAdjustedBase(
   canvas: Canvas,
+  baseCanvas: HTMLCanvasElement | null,
   document: EditorDocument,
   image: HTMLImageElement | null,
   tool: EditorTool,
   stage: HTMLDivElement | null,
 ): void {
+  const geometry = previewGeometry(document, tool, stage);
+  const transform = viewportTransform(document, geometry);
+  drawBaseCanvas(
+    baseCanvas,
+    document,
+    image,
+    geometry,
+    transform,
+    canvas.getWidth(),
+    canvas.getHeight(),
+  );
+}
+
+function viewportTransform(
+  document: EditorDocument,
+  geometry: ReturnType<typeof previewGeometry>,
+): [number, number, number, number, number, number] {
+  const { outputWidth, outputHeight, previewScale, rotationRadians, viewCrop } = geometry;
+  const scaleX = document.transform.flipX ? -1 : 1;
+  const scaleY = document.transform.flipY ? -1 : 1;
+  const cosine = Math.cos(rotationRadians);
+  const sine = Math.sin(rotationRadians);
+  const a = cosine * scaleX;
+  const b = sine * scaleX;
+  const c = -sine * scaleY;
+  const d = cosine * scaleY;
+  const translateX = outputWidth / 2 - (a * viewCrop.width) / 2 - (c * viewCrop.height) / 2;
+  const translateY = outputHeight / 2 - (b * viewCrop.width) / 2 - (d * viewCrop.height) / 2;
+  return [
+    a * previewScale,
+    b * previewScale,
+    c * previewScale,
+    d * previewScale,
+    translateX * previewScale,
+    translateY * previewScale,
+  ];
+}
+
+function drawBaseCanvas(
+  baseCanvas: HTMLCanvasElement | null,
+  document: EditorDocument,
+  image: HTMLImageElement | null,
+  geometry: ReturnType<typeof previewGeometry>,
+  transform: [number, number, number, number, number, number],
+  width: number,
+  height: number,
+): void {
+  if (!baseCanvas) return;
+  baseCanvas.width = width;
+  baseCanvas.height = height;
+  const context = baseCanvas.getContext("2d");
+  if (!context) return;
+  context.clearRect(0, 0, width, height);
   if (!image) return;
-  const { previewScale, viewCrop } = previewGeometry(document, tool, stage);
-  const background = renderAdjustedImage(document, image, viewCrop, previewScale);
-  const base = canvas
-    .getObjects()
-    .find((object) => (object as unknown as FabricCanvasObject).kind === "base");
-  if (!(base instanceof FabricImage)) return;
-  base.setElement(background);
-  base.set({ scaleX: 1 / previewScale, scaleY: 1 / previewScale });
-  base.setCoords();
-  canvas.requestRenderAll();
+  const background = renderAdjustedImage(document, image, geometry.viewCrop, geometry.previewScale);
+  context.save();
+  context.setTransform(...transform);
+  context.drawImage(background, 0, 0, geometry.viewCrop.width, geometry.viewCrop.height);
+  context.restore();
 }
 
 function previewGeometry(
@@ -413,7 +513,6 @@ function previewGeometry(
   previewScale: number;
   rotationRadians: number;
   viewCrop: CropRect;
-  zoom: number;
 } {
   const crop = tool === "crop" ? null : document.crop;
   const viewCrop = crop ?? {
@@ -423,14 +522,13 @@ function previewGeometry(
     height: document.canvas.height,
   };
   const rotation = tool === "crop" ? 0 : document.transform.rotation;
-  const zoom = tool === "crop" ? 1 : document.transform.scale;
   const rotationRadians = (rotation * Math.PI) / 180;
   const outputWidth = Math.max(
     1,
     Math.ceil(
       (Math.abs(Math.cos(rotationRadians)) * viewCrop.width +
         Math.abs(Math.sin(rotationRadians)) * viewCrop.height) *
-        zoom,
+        1,
     ),
   );
   const outputHeight = Math.max(
@@ -438,7 +536,7 @@ function previewGeometry(
     Math.ceil(
       (Math.abs(Math.sin(rotationRadians)) * viewCrop.width +
         Math.abs(Math.cos(rotationRadians)) * viewCrop.height) *
-        zoom,
+        1,
     ),
   );
   const available = availableStageSize(stage);
@@ -448,7 +546,7 @@ function previewGeometry(
     available?.width,
     available?.height,
   );
-  return { outputWidth, outputHeight, previewScale, rotationRadians, viewCrop, zoom };
+  return { outputWidth, outputHeight, previewScale, rotationRadians, viewCrop };
 }
 
 function availableStageSize(
@@ -496,8 +594,13 @@ function restoreSelection(canvas: Canvas, selectedLayerId: string | null): void 
   if (object) canvas.setActiveObject(object);
 }
 
-function fitCanvasToStage(canvas: Canvas, stage: HTMLDivElement | null): void {
-  if (!stage) return;
+function fitCanvasToStage(
+  canvas: Canvas,
+  stage: HTMLDivElement | null,
+  stack: HTMLDivElement | null,
+  viewZoom: number,
+): void {
+  if (!stage || !stack) return;
   const computed = window.getComputedStyle(stage);
   const horizontalPadding =
     Number.parseFloat(computed.paddingLeft) + Number.parseFloat(computed.paddingRight);
@@ -508,11 +611,13 @@ function fitCanvasToStage(canvas: Canvas, stage: HTMLDivElement | null): void {
   const naturalWidth = Math.max(1, canvas.getWidth());
   const naturalHeight = Math.max(1, canvas.getHeight());
   const fit = Math.min(1, availableWidth / naturalWidth, availableHeight / naturalHeight);
-  const displayWidth = Math.max(1, Math.floor(naturalWidth * fit));
-  const displayHeight = Math.max(1, Math.floor(naturalHeight * fit));
+  const displayWidth = Math.max(1, Math.floor(naturalWidth * fit * viewZoom));
+  const displayHeight = Math.max(1, Math.floor(naturalHeight * fit * viewZoom));
   const lowerCanvas = canvas.getElement();
   const wrapper = lowerCanvas.parentElement;
   if (!wrapper) return;
+  stack.style.width = `${displayWidth}px`;
+  stack.style.height = `${displayHeight}px`;
   wrapper.style.width = `${displayWidth}px`;
   wrapper.style.height = `${displayHeight}px`;
   for (const element of wrapper.querySelectorAll("canvas")) {
@@ -525,11 +630,12 @@ function createFabricLayer(
   layer: EditorLayer,
   offsetX: number,
   offsetY: number,
-): IText | Path | null {
+): Textbox | Path | null {
   if (layer.type === "text") {
-    const text = new IText(layer.text, {
+    const text = new Textbox(layer.text, {
       left: layer.left - offsetX,
       top: layer.top - offsetY,
+      width: layer.width,
       fill: layer.color,
       fontSize: layer.fontSize,
       fontFamily: layer.fontFamily,
@@ -537,7 +643,27 @@ function createFabricLayer(
       angle: layer.angle,
       scaleX: layer.scaleX,
       scaleY: layer.scaleY,
+      flipX: layer.flipX,
+      flipY: layer.flipY,
       padding: 8,
+      borderColor: "#3370ff",
+      cornerColor: "#ffffff",
+      cornerStrokeColor: "#3370ff",
+      cornerSize: 12,
+      transparentCorners: false,
+      lockScalingFlip: true,
+      minScaleLimit: 0.01,
+    });
+    text.setControlsVisibility({
+      tl: false,
+      tr: false,
+      bl: false,
+      br: false,
+      mt: false,
+      mb: false,
+      ml: true,
+      mr: true,
+      mtr: true,
     });
     const metadata = text as unknown as FabricCanvasObject;
     metadata.kind = "layer";
@@ -556,6 +682,10 @@ function createFabricLayer(
     angle: layer.angle,
     scaleX: layer.scaleX,
     scaleY: layer.scaleY,
+    flipX: layer.flipX,
+    flipY: layer.flipY,
+    lockScalingFlip: true,
+    minScaleLimit: 0.01,
     strokeLineCap: "round",
     strokeLineJoin: "round",
   });
@@ -589,6 +719,7 @@ function serializeCanvas(
       angle?: number;
       text?: string;
       fontSize?: number;
+      width?: number;
       fill?: string;
       fontFamily?: string;
       fontWeight?: string | number;
@@ -596,6 +727,8 @@ function serializeCanvas(
       stroke?: string;
       strokeWidth?: number;
       opacity?: number;
+      flipX?: boolean;
+      flipY?: boolean;
     };
     if (metadata.kind !== "layer" || !metadata.layerId) continue;
     if (metadata.layerType === "text") {
@@ -606,12 +739,15 @@ function serializeCanvas(
         left: (metadata.left ?? 0) + offsetX,
         top: (metadata.top ?? 0) + offsetY,
         fontSize: metadata.fontSize ?? 32,
+        width: metadata.width ?? 120,
         color: typeof metadata.fill === "string" ? metadata.fill : "#ffffff",
         fontFamily: metadata.fontFamily ?? "Inter, PingFang SC, Microsoft YaHei, sans-serif",
         fontWeight: String(metadata.fontWeight ?? "600"),
         angle: metadata.angle ?? 0,
         scaleX: metadata.scaleX ?? 1,
         scaleY: metadata.scaleY ?? 1,
+        flipX: metadata.flipX ?? false,
+        flipY: metadata.flipY ?? false,
       });
     } else if (metadata.layerType === "drawing" && metadata.path) {
       const path = normalizePath(metadata.path);
@@ -627,18 +763,20 @@ function serializeCanvas(
         top: (metadata.top ?? 0) + offsetY,
         scaleX: metadata.scaleX ?? 1,
         scaleY: metadata.scaleY ?? 1,
+        flipX: metadata.flipX ?? false,
+        flipY: metadata.flipY ?? false,
         angle: metadata.angle ?? 0,
       });
     }
   }
-  return {
+  return normalizeEditorDocument({
     ...document,
     layers,
     crop:
       cropDraft && !document.crop
         ? normalizeCrop(cropDraft, document.canvas.width, document.canvas.height)
         : document.crop,
-  };
+  });
 }
 
 function normalizePath(path: SerializablePath): SerializablePath {

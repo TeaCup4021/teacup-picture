@@ -13,6 +13,8 @@ public final class M3Dtos {
 
     public record RestoreVersionRequest(Long expectedRevision) {}
 
+    public record EditorSaveResult(String mode, String pictureId) {}
+
     public record EditorStateView(Object editorState, Instant updatedAt, Long revision) {}
 
     public record VersionSummary(String id, int versionNumber, String name, String note, String sourceType,

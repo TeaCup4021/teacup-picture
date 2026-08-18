@@ -5,25 +5,46 @@ type EditorStateEnvelope = {
     editorState: {
       schemaVersion: number;
       crop: { x: number; y: number; width: number; height: number } | null;
-      transform: { rotation: number; scale: number };
+      transform: { rotation: number; scale: number; flipX: boolean; flipY: boolean };
       adjustments: Record<string, number>;
-      layers: Array<{ type: string; tool?: string; text?: string; opacity?: number }>;
+      layers: Array<{
+        type: string;
+        tool?: string;
+        text?: string;
+        opacity?: number;
+        width?: number;
+        scaleX: number;
+        scaleY: number;
+        flipX: boolean;
+        flipY: boolean;
+      }>;
     } | null;
     revision: string | null;
   };
 };
 
 type VersionsEnvelope = {
-  data: { items: Array<{ id: string; sourceType: string; parentVersionId: string | null }> };
+  data: {
+    items: Array<{
+      id: string;
+      versionNumber: number;
+      name: string;
+      sourceType: string;
+      parentVersionId: string | null;
+    }>;
+  };
 };
 
-test("M3 editor completes the structured edit, export, version, and restore flow", async ({
-  page,
-}) => {
+type PictureEnvelope = {
+  data: { id: string; name: string; visibility: string; publishStatus: string };
+};
+
+test("M3 editor completes editing, replace, save-as, and restore flows", async ({ page }) => {
   test.setTimeout(150_000);
   const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
   const account = `m3u${suffix}`;
   const password = `M3pass${suffix}`;
+  const apiBaseUrl = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:8123/api/v1";
 
   await page.goto("/register");
   await page.getByRole("textbox", { name: "账号", exact: true }).fill(account);
@@ -39,11 +60,16 @@ test("M3 editor completes the structured edit, export, version, and restore flow
   await page.goto("/upload");
   await page.locator('input[type="file"]').setInputFiles("public/mock-images/gallery-06.jpg");
   await page.getByLabel("图片名称").fill(`M3 编辑器验收 ${suffix}`);
-  await page.getByLabel("简介").fill("真实后端、MinIO 和 EditorState v2 闭环验收");
+  await page.getByLabel("简介").fill("真实后端、MinIO 和 EditorState v3 闭环验收");
   await page.getByRole("button", { name: "保存到个人空间" }).click();
   await page.waitForURL(/\/pictures\/\d+$/);
   const pictureId = page.url().match(/\/pictures\/(\d+)/)?.[1];
   expect(pictureId).toBeTruthy();
+  const originalContentResponse = await page.request.get(
+    `${apiBaseUrl}/pictures/${pictureId}/content?variant=original`,
+  );
+  expect(originalContentResponse.ok()).toBe(true);
+  const originalContent = await originalContentResponse.body();
   const editButton = page.getByRole("link", { name: /编辑图片/ });
   await expect(editButton).toBeVisible();
 
@@ -59,31 +85,35 @@ test("M3 editor completes the structured edit, export, version, and restore flow
   await editButton.click();
   await page.waitForURL(`/editor/${pictureId}`);
   await page.locator(".upper-canvas").waitFor({ state: "visible" });
+  await expect(page.getByRole("tab", { name: /图层/ })).toHaveCount(0);
   await page.waitForTimeout(1_200);
   expect(draftWrites).toEqual([]);
 
   const initialCanvas = await page
-    .locator(".lower-canvas")
+    .locator(".editor-base-canvas")
     .evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL("image/png"));
   const upperBackground = await page
     .locator(".upper-canvas")
     .evaluate((canvas) => getComputedStyle(canvas).backgroundColor);
   expect(upperBackground).toBe("rgba(0, 0, 0, 0)");
 
+  const initialCanvasBox = await page.locator(".editor-canvas-stack").boundingBox();
+  expect(initialCanvasBox).not.toBeNull();
+  await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
+  await page.getByRole("button", { name: "放大" }).click();
+  const zoomedCanvasBox = await page.locator(".editor-canvas-stack").boundingBox();
+  expect(zoomedCanvasBox!.width).toBeGreaterThan(initialCanvasBox!.width);
+  await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
+  await page.getByRole("button", { name: "适应窗口" }).click();
+
   const initialExposure = page.getByRole("slider", { name: "曝光", exact: true });
-  const exposureBox = await initialExposure.boundingBox();
-  expect(exposureBox).not.toBeNull();
-  await page.mouse.move(
-    exposureBox!.x + exposureBox!.width / 2,
-    exposureBox!.y + exposureBox!.height / 2,
-  );
-  await page.mouse.down();
-  await page.mouse.move(
-    exposureBox!.x + exposureBox!.width * 0.8,
-    exposureBox!.y + exposureBox!.height / 2,
-    { steps: 20 },
-  );
-  await page.mouse.up();
+  const exposureRow = page.locator(".editor-adjustment-row").filter({ has: initialExposure });
+  await exposureRow.getByText("-50", { exact: true }).click();
+  await expect(initialExposure).toHaveAttribute("aria-valuenow", "-50");
+  await exposureRow.getByText("0", { exact: true }).click();
+  await expect(initialExposure).toHaveAttribute("aria-valuenow", "0");
+  await initialExposure.focus();
+  await initialExposure.press("ArrowRight");
   const draggedExposure = Number(await initialExposure.getAttribute("aria-valuenow"));
   expect(draggedExposure).toBeGreaterThan(0);
   await page.getByRole("button", { name: "撤销" }).click();
@@ -104,12 +134,9 @@ test("M3 editor completes the structured edit, export, version, and restore flow
     .getByRole("button", { name: "不保存并退出" })
     .click();
   await page.waitForURL(`/pictures/${pictureId}`);
-  const discardedInitialDraft = await page.evaluate<EditorStateEnvelope, string>(async (id) => {
-    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, {
-      credentials: "include",
-    });
-    return response.json();
-  }, pictureId!);
+  const discardedInitialDraft = (await (
+    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
+  ).json()) as EditorStateEnvelope;
   expect(discardedInitialDraft.data.editorState).toBeNull();
   expect(discardedInitialDraft.data.revision).toBeNull();
   draftWrites.length = 0;
@@ -140,7 +167,7 @@ test("M3 editor completes the structured edit, export, version, and restore flow
   }
   await expect.poll(() => draftWrites.filter((status) => status === 200).length).toBeGreaterThan(0);
   const adjustedCanvas = await page
-    .locator(".lower-canvas")
+    .locator(".editor-base-canvas")
     .evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL("image/png"));
   expect(adjustedCanvas).not.toBe(initialCanvas);
 
@@ -152,10 +179,22 @@ test("M3 editor completes the structured edit, export, version, and restore flow
     canvasBox!.y + canvasBox!.height * 0.5,
   );
   await page.keyboard.type("验收文字");
-  await page.waitForTimeout(450);
   await page.getByRole("button", { name: "选择", exact: true }).click();
+  await page.getByRole("tab", { name: "对象属性" }).click();
+  const textWidth = page.getByRole("spinbutton", { name: "文本框宽度" });
+  await textWidth.fill("260");
+  await textWidth.press("Enter");
+  await page
+    .locator(".editor-layer-flips")
+    .getByRole("button")
+    .filter({ hasText: "水平翻转" })
+    .click();
 
-  for (const tool of ["画笔", "马克笔", "擦除"] as const) {
+  const baseBeforeDrawing = await page
+    .locator(".editor-base-canvas")
+    .evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL("image/png"));
+
+  for (const tool of ["画笔", "马克笔"] as const) {
     await page.getByRole("button", { name: tool, exact: true }).click();
     canvasBox = await page.locator(".upper-canvas").boundingBox();
     expect(canvasBox).not.toBeNull();
@@ -165,23 +204,48 @@ test("M3 editor completes the structured edit, export, version, and restore flow
     await page.mouse.move(canvasBox!.x + 220 + offset, canvasBox!.y + 180, { steps: 8 });
     await page.mouse.up();
   }
+  const overlayBeforeErase = await page
+    .locator(".lower-canvas")
+    .evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL("image/png"));
+  await page.getByRole("button", { name: "擦除", exact: true }).click();
+  await expect(page.getByRole("button", { name: "擦除", exact: true })).toHaveClass(/is-active/);
+  canvasBox = await page.locator(".upper-canvas").boundingBox();
+  await page.mouse.move(canvasBox!.x + 205, canvasBox!.y + 80);
+  await expect(page.locator(".editor-eraser-cursor")).toBeVisible();
+  expect(
+    await page
+      .locator(".editor-eraser-cursor")
+      .evaluate((element) => getComputedStyle(element).backgroundColor),
+  ).toBe("rgba(142, 151, 163, 0.28)");
+  await page.mouse.down();
+  await page.mouse.move(canvasBox!.x + 205, canvasBox!.y + 220, { steps: 8 });
+  await page.mouse.up();
+  const overlayAfterErase = await page
+    .locator(".lower-canvas")
+    .evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL("image/png"));
+  const baseAfterErase = await page
+    .locator(".editor-base-canvas")
+    .evaluate((canvas) => (canvas as HTMLCanvasElement).toDataURL("image/png"));
+  expect(overlayAfterErase).not.toBe(overlayBeforeErase);
+  expect(baseAfterErase).toBe(baseBeforeDrawing);
 
   await page.getByRole("button", { name: "裁切", exact: true }).click();
   await page.getByRole("button", { name: "应用裁切" }).click();
   await page.getByRole("button", { name: "向右旋转" }).click();
-  await page.getByRole("button", { name: "放大" }).click();
+  await page.getByRole("button", { name: "水平翻转画布" }).click();
   await page.getByRole("button", { name: "撤销" }).click();
   await page.getByRole("button", { name: "重做" }).click();
   await page.waitForTimeout(1_200);
 
-  const draft = await page.evaluate<EditorStateEnvelope, string>(async (id) => {
-    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, {
-      credentials: "include",
-    });
-    return response.json();
-  }, pictureId!);
+  const draft = (await (
+    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
+  ).json()) as EditorStateEnvelope;
   const draftDocument = draft.data.editorState!;
-  expect(draftDocument).toMatchObject({ schemaVersion: 2, crop: expect.any(Object) });
+  expect(draftDocument).toMatchObject({
+    schemaVersion: 3,
+    crop: expect.any(Object),
+    transform: { flipX: true, flipY: false },
+  });
   expect(Number(draft.data.revision)).toBeGreaterThan(0);
   expect(draftDocument.adjustments).toMatchObject({ highlights: 1, shadows: 1, sharpness: 1 });
   expect(draftDocument.layers.filter((layer) => layer.type === "drawing")).toHaveLength(3);
@@ -189,6 +253,13 @@ test("M3 editor completes the structured edit, export, version, and restore flow
   expect(
     draftDocument.layers.some((layer) => layer.type === "text" && layer.text === "验收文字"),
   ).toBe(true);
+  const textLayer = draftDocument.layers.find(
+    (layer) => layer.type === "text" && layer.text === "验收文字",
+  );
+  expect(textLayer).toMatchObject({ width: 260, flipX: true });
+  expect(draftDocument.layers.every((layer) => layer.scaleX >= 0.01 && layer.scaleY >= 0.01)).toBe(
+    true,
+  );
 
   const download = await Promise.all([
     page.waitForEvent("download"),
@@ -196,72 +267,103 @@ test("M3 editor completes the structured edit, export, version, and restore flow
   ]);
   expect(download[0].suggestedFilename()).toMatch(/\.png$/);
 
-  await page.locator("button").filter({ hasText: "保存版本" }).first().click();
-  await page.getByLabel("版本名称").fill("M3 E2E 验收版本");
-  await page.getByLabel("版本说明").fill("全量编辑、导出与版本恢复");
-  await page.getByRole("dialog").getByRole("button", { name: "保存版本", exact: true }).click();
-  await page.getByText("已保存正式版本").waitFor({ timeout: 60_000 });
-
-  const writesBeforeDiscard = draftWrites.length;
-  await page.getByRole("slider", { name: "曝光", exact: true }).press("ArrowRight");
-  await expect.poll(() => draftWrites.length).toBeGreaterThan(writesBeforeDiscard);
-  await page.getByRole("button", { name: /退出编辑/ }).click();
-  await page
-    .getByRole("dialog", { name: /退出编辑/ })
-    .getByRole("button", { name: "不保存并退出" })
-    .click();
+  await page.getByRole("button", { name: "保存图片" }).click();
+  const saveDialog = page.getByRole("dialog", { name: "保存图片" });
+  await expect(saveDialog.getByText("替换当前图片", { exact: true })).toBeVisible();
+  await expect(saveDialog.getByText("另存为新图片", { exact: true })).toBeVisible();
+  await saveDialog.getByRole("button", { name: "确认保存" }).click();
   await page.waitForURL(`/pictures/${pictureId}`);
-  const discardedAfterVersion = await page.evaluate<EditorStateEnvelope, string>(async (id) => {
-    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, {
-      credentials: "include",
-    });
-    return response.json();
-  }, pictureId!);
-  expect(discardedAfterVersion.data.editorState?.adjustments.exposure).toBe(1);
+  const draftAfterReplace = (await (
+    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
+  ).json()) as EditorStateEnvelope;
+  expect(draftAfterReplace.data.editorState).toBeNull();
+  expect(draftAfterReplace.data.revision).toBeNull();
+
+  const replacedContentResponse = await page.request.get(
+    `${apiBaseUrl}/pictures/${pictureId}/content?variant=original`,
+  );
+  const replacedContent = await replacedContentResponse.body();
+  expect(Buffer.compare(replacedContent, originalContent)).not.toBe(0);
+
+  let versionHistory = (await (
+    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/versions`)
+  ).json()) as VersionsEnvelope;
+  expect(versionHistory.data.items.map((version) => version.sourceType)).toEqual([
+    "user_save",
+    "original",
+  ]);
+  const originalVersion = versionHistory.data.items.find(
+    (version) => version.sourceType === "original",
+  );
+  expect(originalVersion).toBeTruthy();
+
+  await page.getByRole("link", { name: /编辑图片/ }).click();
+  await page.waitForURL(`/editor/${pictureId}`);
+  await page.locator(".upper-canvas").waitFor({ state: "visible" });
+  await page.getByRole("slider", { name: "亮度", exact: true }).press("ArrowRight");
+  await page.getByRole("button", { name: "保存图片" }).click();
+  const copyDialog = page.getByRole("dialog", { name: "保存图片" });
+  await copyDialog.getByText("另存为新图片", { exact: true }).click();
+  const copyName = `M3 另存验收 ${suffix}`;
+  await copyDialog.getByLabel("新图片名称").fill(copyName);
+  await copyDialog.getByRole("button", { name: "确认保存" }).click();
+  await page.waitForURL(/\/pictures\/\d+$/);
+  const copyPictureId = page.url().match(/\/pictures\/(\d+)/)?.[1];
+  expect(copyPictureId).toBeTruthy();
+  expect(copyPictureId).not.toBe(pictureId);
+
+  const copyDetail = (await (
+    await page.request.get(`${apiBaseUrl}/pictures/${copyPictureId}`)
+  ).json()) as PictureEnvelope;
+  expect(copyDetail.data).toMatchObject({
+    id: copyPictureId,
+    name: copyName,
+    visibility: "private",
+    publishStatus: "not_requested",
+  });
+  const originalAfterCopy = await (
+    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/content?variant=original`)
+  ).body();
+  expect(Buffer.compare(originalAfterCopy, replacedContent)).toBe(0);
+
+  await page.goto(`/pictures/${pictureId}`);
   await page.getByRole("link", { name: /编辑图片/ }).click();
   await page.waitForURL(`/editor/${pictureId}`);
   await page.locator(".upper-canvas").waitFor({ state: "visible" });
 
   await page.getByRole("button", { name: /版本历史/ }).click();
-  await page.getByText(/v1 M3 E2E 验收版本/).waitFor();
-  await page.locator(".ant-drawer button").filter({ hasText: "恢复" }).first().click();
+  const originalVersionItem = page
+    .locator(".version-list-item")
+    .filter({ hasText: `v${originalVersion!.versionNumber} 原始图片` });
+  await originalVersionItem.getByRole("button", { name: "恢复" }).click();
   await page.locator(".ant-popconfirm-buttons .ant-btn-primary").click();
   await page.getByText("已恢复为当前版本").waitFor();
-
-  await page.getByRole("slider", { name: "曝光", exact: true }).press("ArrowRight");
-  await page.getByRole("button", { name: /退出编辑/ }).click();
-  await page
-    .getByRole("dialog", { name: /退出编辑/ })
-    .getByRole("button", { name: "保存草稿并退出" })
-    .click();
   await page.waitForURL(`/pictures/${pictureId}`);
-  const savedOnExit = await page.evaluate<EditorStateEnvelope, string>(async (id) => {
-    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/editor-state`, {
-      credentials: "include",
-    });
-    return response.json();
-  }, pictureId!);
-  expect(savedOnExit.data.editorState?.adjustments.exposure).toBe(2);
-  expect(Number(savedOnExit.data.revision)).toBeGreaterThan(
-    Number(discardedAfterVersion.data.revision ?? 0),
-  );
+  const draftAfterRestore = (await (
+    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
+  ).json()) as EditorStateEnvelope;
+  expect(draftAfterRestore.data.editorState).toBeNull();
+  expect(draftAfterRestore.data.revision).toBeNull();
+  const restoredContent = await (
+    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/content?variant=original`)
+  ).body();
+  expect(Buffer.compare(restoredContent, originalContent)).toBe(0);
 
-  const versions = await page.evaluate<VersionsEnvelope, string>(async (id) => {
-    const response = await fetch(`http://127.0.0.1:8123/api/v1/pictures/${id}/versions`, {
-      credentials: "include",
-    });
-    return response.json();
-  }, pictureId!);
-  expect(versions.data.items.map((version) => version.sourceType)).toEqual([
+  versionHistory = (await (
+    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/versions`)
+  ).json()) as VersionsEnvelope;
+  expect(versionHistory.data.items.map((version) => version.sourceType)).toEqual([
     "restore",
     "user_save",
+    "original",
   ]);
-  expect(versions.data.items[0]?.parentVersionId).toBe(versions.data.items[1]?.id);
+  expect(versionHistory.data.items[0]?.parentVersionId).toBe(originalVersion!.id);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/editor/${pictureId}`);
   await page.locator(".upper-canvas").waitFor({ state: "visible" });
   await expect(page.getByRole("button", { name: /导出/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /保存版本/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存图片" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /退出编辑/ })).toContainText("退出");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });

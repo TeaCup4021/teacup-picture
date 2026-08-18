@@ -5,6 +5,7 @@ import {
   adjustmentRange,
   createEmptyDocument,
   normalizeCrop,
+  normalizeEditorDocument,
   removeObject,
   rotateDocument,
   scaleDocument,
@@ -20,7 +21,7 @@ describe("editor document model", () => {
     expect(document.canvas.height).toBe(600);
     expect(document.layers).toEqual([]);
     expect(document.adjustments.brightness).toBe(0);
-    expect(document.schemaVersion).toBe(2);
+    expect(document.schemaVersion).toBe(3);
   });
 
   it("adds, updates and removes objects without mutating the original", () => {
@@ -32,11 +33,16 @@ describe("editor document model", () => {
       color: "#ff0000",
       size: 4,
       opacity: 1,
-      path: [["M", 0, 0], ["L", 1, 2]],
+      path: [
+        ["M", 0, 0],
+        ["L", 1, 2],
+      ],
       left: 0,
       top: 0,
       scaleX: 1,
       scaleY: 1,
+      flipX: false,
+      flipY: false,
       angle: 0,
     });
 
@@ -87,5 +93,39 @@ describe("editor document model", () => {
     const document = createEmptyDocument(800, 600);
     expect(rotateDocument(document, 270).transform.rotation).toBe(270);
     expect(rotateDocument(rotateDocument(document, 180), 180).transform.rotation).toBe(0);
+  });
+
+  it("upgrades v2 layers to positive scales with explicit flips", () => {
+    const upgraded = normalizeEditorDocument({
+      ...createEmptyDocument(800, 600),
+      schemaVersion: 2,
+      transform: { rotation: 0, scale: 1 },
+      layers: [
+        {
+          id: "legacy-text",
+          type: "text",
+          text: "旧文字",
+          left: 20,
+          top: 30,
+          fontSize: 32,
+          color: "#ffffff",
+          fontFamily: "sans-serif",
+          fontWeight: "600",
+          angle: 0,
+          scaleX: -2,
+          scaleY: 0,
+        },
+      ],
+    });
+
+    expect(upgraded.schemaVersion).toBe(3);
+    expect(upgraded.transform).toMatchObject({ flipX: false, flipY: false });
+    expect(upgraded.layers[0]).toMatchObject({
+      scaleX: 2,
+      scaleY: 0.01,
+      flipX: true,
+      flipY: false,
+    });
+    expect(upgraded.layers[0]?.type === "text" && upgraded.layers[0].width).toBeGreaterThan(0);
   });
 });

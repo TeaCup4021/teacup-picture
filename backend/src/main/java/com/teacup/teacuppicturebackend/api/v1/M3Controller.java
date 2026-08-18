@@ -81,6 +81,19 @@ public class M3Controller {
                 request);
     }
 
+    @PostMapping(value = "/pictures/{pictureId}/editor-saves", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<V1Response<M3Dtos.EditorSaveResult>> saveEditorResult(
+            @PathVariable String pictureId,
+            @RequestPart("file") MultipartFile image,
+            @RequestParam String mode,
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) Long expectedRevision,
+            HttpServletRequest request) {
+        return response(HttpStatus.OK,
+                service.saveEditorResult(auth.requireUser(request), parseId(pictureId), image,
+                        mode, name, expectedRevision), request);
+    }
+
     @PostMapping("/pictures/{pictureId}/versions/{versionId}/restore")
     public ResponseEntity<V1Response<M3Dtos.VersionDetail>> restoreVersion(
             @PathVariable String pictureId, @PathVariable String versionId,

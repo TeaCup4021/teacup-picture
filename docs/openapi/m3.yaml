@@ -4,8 +4,8 @@ info:
   version: 1.0.0
   description: >-
     M3 contract for the single-user structured picture editor, autosaved drafts,
-    immutable picture versions, previews, authenticated version content, and
-    restoring an older version as a new current version.
+    flattened replace/save-as results, immutable picture versions, previews,
+    authenticated version content, and restoring history to the current picture.
 servers:
   - url: http://localhost:8123/api/v1
     description: Local backend
@@ -84,6 +84,33 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /pictures/{pictureId}/editor-saves:
+    post:
+      tags: [Editor]
+      operationId: saveEditorResult
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, mode]
+              properties:
+                file: { type: string, format: binary, description: Flattened PNG rendered by the editor and stored in private MinIO }
+                mode: { $ref: '#/components/schemas/EditorSaveMode' }
+                name: { type: string, minLength: 1, maxLength: 128, description: New picture name; used only when mode is copy }
+                expectedRevision:
+                  oneOf:
+                    - { $ref: '#/components/schemas/Revision' }
+                    - { type: 'null' }
+      responses:
+        '200': { description: Current picture replaced or a private copy created, content: { application/json: { schema: { $ref: '#/components/schemas/EditorSaveResultResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /pictures/{pictureId}/versions/{versionId}:
     get:
       tags: [Versions]
@@ -104,7 +131,7 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/RestoreVersionRequest' } } }
       responses:
-        '201': { description: New version created from the restored version and applied to the current draft, content: { application/json: { schema: { $ref: '#/components/schemas/VersionDetailResponse' } } } }
+        '201': { description: New restore version created, current picture asset replaced, and current draft cleared, content: { application/json: { schema: { $ref: '#/components/schemas/VersionDetailResponse' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -135,13 +162,21 @@ components:
   schemas:
     Id: { type: string, pattern: '^[1-9][0-9]*$' }
     Revision: { type: string, pattern: '^[1-9][0-9]*$', description: Optimistic concurrency revision serialized as a decimal string }
-    VersionSourceType: { type: string, enum: [user_save, restore, ai_generate, ai_outpaint, team_confirm] }
+    VersionSourceType: { type: string, enum: [original, user_save, restore, ai_generate, ai_outpaint, team_confirm] }
+    EditorSaveMode: { type: string, enum: [replace, copy] }
+    EditorSaveResult:
+      type: object
+      required: [mode, pictureId]
+      properties:
+        mode: { $ref: '#/components/schemas/EditorSaveMode' }
+        pictureId: { $ref: '#/components/schemas/Id' }
+    EditorSaveResultResponse: { $ref: '#/components/schemas/EditorSaveResult' }
     EditorDocument:
       type: object
       additionalProperties: false
       required: [schemaVersion, canvas, transform, crop, adjustments, layers]
       properties:
-        schemaVersion: { type: integer, enum: [2] }
+        schemaVersion: { type: integer, enum: [3] }
         canvas:
           type: object
           additionalProperties: false
@@ -152,10 +187,12 @@ components:
         transform:
           type: object
           additionalProperties: false
-          required: [rotation, scale]
+          required: [rotation, scale, flipX, flipY]
           properties:
             rotation: { type: number, minimum: -360, maximum: 360 }
             scale: { type: number, minimum: 0.25, maximum: 4 }
+            flipX: { type: boolean }
+            flipY: { type: boolean }
         crop:
           oneOf:
             - type: 'null'
@@ -196,7 +233,7 @@ components:
     TextLayer:
       type: object
       additionalProperties: false
-      required: [id, type, text, left, top, fontSize, color, fontFamily, fontWeight, angle, scaleX, scaleY]
+      required: [id, type, text, left, top, fontSize, width, color, fontFamily, fontWeight, angle, scaleX, scaleY, flipX, flipY]
       properties:
         id: { type: string, minLength: 1, maxLength: 128 }
         type: { type: string, enum: [text] }
@@ -204,16 +241,19 @@ components:
         left: { type: number, minimum: -1000000, maximum: 1000000 }
         top: { type: number, minimum: -1000000, maximum: 1000000 }
         fontSize: { type: number, minimum: 8, maximum: 512 }
+        width: { type: number, minimum: 1, maximum: 32768 }
         color: { type: string, pattern: '^#[0-9a-fA-F]{6,8}$' }
         fontFamily: { type: string, minLength: 1, maxLength: 128 }
         fontWeight: { type: string, minLength: 1, maxLength: 32 }
         angle: { type: number, minimum: -36000, maximum: 36000 }
         scaleX: { type: number, exclusiveMinimum: 0, maximum: 100 }
         scaleY: { type: number, exclusiveMinimum: 0, maximum: 100 }
+        flipX: { type: boolean }
+        flipY: { type: boolean }
     DrawingLayer:
       type: object
       additionalProperties: false
-      required: [id, type, tool, color, size, opacity, path, left, top, scaleX, scaleY, angle]
+      required: [id, type, tool, color, size, opacity, path, left, top, scaleX, scaleY, flipX, flipY, angle]
       properties:
         id: { type: string, minLength: 1, maxLength: 128 }
         type: { type: string, enum: [drawing] }
@@ -235,6 +275,8 @@ components:
         top: { type: number, minimum: -1000000, maximum: 1000000 }
         scaleX: { type: number, exclusiveMinimum: 0, maximum: 100 }
         scaleY: { type: number, exclusiveMinimum: 0, maximum: 100 }
+        flipX: { type: boolean }
+        flipY: { type: boolean }
         angle: { type: number, minimum: -36000, maximum: 36000 }
     EditorState:
       type: object

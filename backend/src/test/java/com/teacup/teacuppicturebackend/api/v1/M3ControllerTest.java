@@ -108,6 +108,22 @@ class M3ControllerTest {
     }
 
     @Test
+    void saveEditorResultMapsReplaceRequest() throws Exception {
+        when(auth.requireUser(any())).thenReturn(user);
+        when(service.saveEditorResult(eq(user), eq(100L), any(), eq("replace"), eq(null), eq(9L)))
+                .thenReturn(new M3Dtos.EditorSaveResult("replace", "100"));
+        MockMultipartFile image = new MockMultipartFile("file", "result.png", "image/png", new byte[]{1, 2, 3});
+
+        mockMvc.perform(multipart("/api/v1/pictures/100/editor-saves")
+                        .file(image)
+                        .param("mode", "replace")
+                        .param("expectedRevision", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("replace"))
+                .andExpect(jsonPath("$.data.pictureId").value("100"));
+    }
+
+    @Test
     void restoreVersionReturnsCreatedStatus() throws Exception {
         when(auth.requireUser(any())).thenReturn(user);
         when(service.restoreVersion(user, 100L, 51L, 9L))

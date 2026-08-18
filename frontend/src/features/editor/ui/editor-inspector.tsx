@@ -1,30 +1,17 @@
 "use client";
 
-import { DeleteOutlined, DownOutlined, DragOutlined, UpOutlined } from "@ant-design/icons";
-import {
-  Button,
-  ColorPicker,
-  Empty,
-  Input,
-  InputNumber,
-  List,
-  Slider,
-  Tabs,
-  Typography,
-} from "antd";
+import { DeleteOutlined, SwapOutlined } from "@ant-design/icons";
+import { Button, ColorPicker, Empty, Input, InputNumber, Slider, Tabs, Typography } from "antd";
 import type { AdjustmentKey, EditorAdjustments, EditorLayer } from "@/features/editor/model/types";
 import { adjustmentRange } from "@/features/editor/model/document";
 
 interface EditorInspectorProps {
   adjustments: EditorAdjustments;
-  layers: EditorLayer[];
   selectedLayer: EditorLayer | null;
   onAdjustmentPreview: (key: AdjustmentKey, value: number) => void;
   onAdjustmentCommit: (key: AdjustmentKey, value: number) => void;
-  onLayerSelect: (id: string) => void;
   onLayerChange: (id: string, patch: Partial<EditorLayer>) => void;
   onLayerDelete: (id: string) => void;
-  onLayerMove: (id: string, direction: "up" | "down") => void;
 }
 
 const adjustmentItems: Array<{ key: AdjustmentKey; label: string }> = [
@@ -46,14 +33,11 @@ const adjustmentItems: Array<{ key: AdjustmentKey; label: string }> = [
 
 export function EditorInspector({
   adjustments,
-  layers,
   selectedLayer,
   onAdjustmentPreview,
   onAdjustmentCommit,
-  onLayerSelect,
   onLayerChange,
   onLayerDelete,
-  onLayerMove,
 }: EditorInspectorProps) {
   return (
     <Tabs
@@ -75,6 +59,7 @@ export function EditorInspector({
                       min={range.min}
                       max={range.max}
                       step={1}
+                      marks={adjustmentMarks(range.min)}
                       value={adjustments[item.key]}
                       onChange={(value) => onAdjustmentPreview(item.key, value)}
                       onChangeComplete={(value) => onAdjustmentCommit(item.key, value)}
@@ -87,71 +72,6 @@ export function EditorInspector({
               })}
             </div>
           ),
-        },
-        {
-          key: "layers",
-          label: `图层 ${layers.length}`,
-          children:
-            layers.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="使用文字或画笔创建图层" />
-            ) : (
-              <List
-                className="editor-layer-list"
-                dataSource={[...layers].reverse()}
-                renderItem={(layer, index) => (
-                  <List.Item
-                    className={
-                      selectedLayer?.id === layer.id
-                        ? "editor-layer-item is-selected"
-                        : "editor-layer-item"
-                    }
-                    onClick={() => onLayerSelect(layer.id)}
-                    actions={[
-                      <Button
-                        key="up"
-                        type="text"
-                        size="small"
-                        icon={<UpOutlined />}
-                        aria-label="图层上移"
-                        disabled={index === 0}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onLayerMove(layer.id, "up");
-                        }}
-                      />,
-                      <Button
-                        key="down"
-                        type="text"
-                        size="small"
-                        icon={<DownOutlined />}
-                        aria-label="图层下移"
-                        disabled={index === layers.length - 1}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onLayerMove(layer.id, "down");
-                        }}
-                      />,
-                    ]}
-                  >
-                    <List.Item.Meta
-                      avatar={
-                        <span className="editor-layer-icon">
-                          <DragOutlined />
-                        </span>
-                      }
-                      title={
-                        layer.type === "text"
-                          ? layer.text || "文字"
-                          : layer.tool === "eraser"
-                            ? "擦除笔迹"
-                            : "涂鸦笔迹"
-                      }
-                      description={layer.type === "text" ? "文字图层" : "绘画图层"}
-                    />
-                  </List.Item>
-                )}
-              />
-            ),
         },
         {
           key: "properties",
@@ -180,6 +100,25 @@ function LayerProperties({
   onChange: (id: string, patch: Partial<EditorLayer>) => void;
   onDelete: (id: string) => void;
 }) {
+  const flipControls = (
+    <div className="editor-layer-flips" aria-label="对象翻转">
+      <Button
+        type={layer.flipX ? "primary" : "default"}
+        icon={<SwapOutlined />}
+        onClick={() => onChange(layer.id, { flipX: !layer.flipX })}
+      >
+        水平翻转
+      </Button>
+      <Button
+        type={layer.flipY ? "primary" : "default"}
+        className="editor-flip-vertical"
+        icon={<SwapOutlined />}
+        onClick={() => onChange(layer.id, { flipY: !layer.flipY })}
+      >
+        垂直翻转
+      </Button>
+    </div>
+  );
   if (layer.type === "text") {
     return (
       <div className="editor-text-properties">
@@ -200,14 +139,24 @@ function LayerProperties({
           />
         </label>
         <label>
+          文本框宽度
+          <InputNumber
+            min={40}
+            max={32768}
+            value={Math.round(layer.width)}
+            onChange={(value) => onChange(layer.id, { width: value ?? 120 })}
+          />
+        </label>
+        <label>
           颜色
           <ColorPicker
             value={layer.color}
             onChange={(color) => onChange(layer.id, { color: color.toHexString() })}
           />
         </label>
+        {flipControls}
         <Button danger icon={<DeleteOutlined />} onClick={() => onDelete(layer.id)}>
-          删除图层
+          删除对象
         </Button>
       </div>
     );
@@ -215,7 +164,7 @@ function LayerProperties({
   return (
     <div className="editor-text-properties">
       <Typography.Text type="secondary">
-        绘画图层 · {layer.tool === "eraser" ? "擦除" : layer.tool === "marker" ? "马克笔" : "画笔"}
+        绘画对象 · {layer.tool === "eraser" ? "擦除" : layer.tool === "marker" ? "马克笔" : "画笔"}
       </Typography.Text>
       <label>
         颜色
@@ -234,9 +183,14 @@ function LayerProperties({
           onChange={(value) => onChange(layer.id, { size: value ?? 4 })}
         />
       </label>
+      {flipControls}
       <Button danger icon={<DeleteOutlined />} onClick={() => onDelete(layer.id)}>
-        删除图层
+        删除对象
       </Button>
     </div>
   );
+}
+
+function adjustmentMarks(min: number): Record<number, string> {
+  return min < 0 ? { [-50]: "-50", 0: "0", 50: "50" } : { 0: "0", 50: "50", 100: "100" };
 }

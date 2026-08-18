@@ -1,18 +1,26 @@
 package com.teacup.teacuppicturebackend.api.v1;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.teacup.teacuppicturebackend.api.v1.model.M1Dtos;
 import com.teacup.teacuppicturebackend.api.v1.model.M3Dtos;
 import com.teacup.teacuppicturebackend.mapper.PictureDraftMapper;
 import com.teacup.teacuppicturebackend.mapper.PictureMapper;
 import com.teacup.teacuppicturebackend.mapper.PictureVersionMapper;
+import com.teacup.teacuppicturebackend.mapper.PublishRequestMapper;
+import com.teacup.teacuppicturebackend.mapper.SpaceMapper;
 import com.teacup.teacuppicturebackend.mapper.UserMapper;
 import com.teacup.teacuppicturebackend.model.entity.Picture;
 import com.teacup.teacuppicturebackend.model.entity.PictureDraft;
 import com.teacup.teacuppicturebackend.model.entity.PictureVersion;
+import com.teacup.teacuppicturebackend.model.entity.PublishRequest;
+import com.teacup.teacuppicturebackend.model.entity.Space;
 import com.teacup.teacuppicturebackend.model.entity.User;
 import com.teacup.teacuppicturebackend.service.UserService;
 import com.teacup.teacuppicturebackend.storage.PictureAssetService;
@@ -22,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -33,21 +42,23 @@ public class M3Service {
     private static final int MAX_EDITOR_STATE_CHARS = 4_000_000;
     private static final int MAX_LAYERS = 500;
     private static final int MAX_PATH_COMMANDS = 20_000;
-    private static final int EDITOR_SCHEMA_VERSION = 2;
-    private static final Set<String> SOURCE_TYPES = Set.of("user_save", "restore", "ai_generate", "ai_outpaint", "team_confirm");
+    private static final int EDITOR_SCHEMA_VERSION = 3;
+    private static final Set<String> SOURCE_TYPES = Set.of("original", "user_save", "restore", "ai_generate", "ai_outpaint", "team_confirm");
     private static final Set<String> DOCUMENT_FIELDS = Set.of("schemaVersion", "canvas", "transform", "crop", "adjustments", "layers");
     private static final Set<String> ADJUSTMENT_FIELDS = Set.of("exposure", "brightness", "contrast", "highlights", "shadows",
             "saturation", "vibrance", "temperature", "tint", "sharpness", "fade", "vignette", "enhance", "dehaze");
     private static final Set<String> NON_NEGATIVE_ADJUSTMENTS = Set.of("fade", "enhance", "dehaze");
-    private static final Set<String> TEXT_LAYER_FIELDS = Set.of("id", "type", "text", "left", "top", "fontSize", "color",
-            "fontFamily", "fontWeight", "angle", "scaleX", "scaleY");
+    private static final Set<String> TEXT_LAYER_FIELDS = Set.of("id", "type", "text", "left", "top", "fontSize", "width", "color",
+            "fontFamily", "fontWeight", "angle", "scaleX", "scaleY", "flipX", "flipY");
     private static final Set<String> DRAWING_LAYER_FIELDS = Set.of("id", "type", "tool", "color", "size", "opacity", "path",
-            "left", "top", "scaleX", "scaleY", "angle");
+            "left", "top", "scaleX", "scaleY", "flipX", "flipY", "angle");
     private static final Set<String> DRAWING_TOOLS = Set.of("pen", "marker", "eraser");
 
     private final PictureMapper pictureMapper;
     private final PictureDraftMapper draftMapper;
     private final PictureVersionMapper versionMapper;
+    private final PublishRequestMapper publishRequestMapper;
+    private final SpaceMapper spaceMapper;
     private final UserMapper userMapper;
     private final UserService userService;
     private final PictureStorage storage;
@@ -55,11 +66,14 @@ public class M3Service {
     private final ObjectMapper objectMapper;
 
     public M3Service(PictureMapper pictureMapper, PictureDraftMapper draftMapper, PictureVersionMapper versionMapper,
+                     PublishRequestMapper publishRequestMapper, SpaceMapper spaceMapper,
                      UserMapper userMapper, UserService userService, PictureStorage storage,
                      PictureAssetService assets, ObjectMapper objectMapper) {
         this.pictureMapper = pictureMapper;
         this.draftMapper = draftMapper;
         this.versionMapper = versionMapper;
+        this.publishRequestMapper = publishRequestMapper;
+        this.spaceMapper = spaceMapper;
         this.userMapper = userMapper;
         this.userService = userService;
         this.storage = storage;
@@ -151,8 +165,35 @@ public class M3Service {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    public M3Dtos.EditorSaveResult saveEditorResult(User user, long pictureId, MultipartFile image,
+                                                     String mode, String name, Long expectedRevision) {
+        Picture picture = requireOwnedPicture(user, pictureId);
+        if (image == null || image.isEmpty()) throw V1Exception.badRequest("保存图片不能为空");
+        String normalizedMode = normalizeSaveMode(mode);
+        if (picture.getSpaceId() == null) throw V1Exception.badRequest("图片尚未绑定可用空间");
+        lockPicture(pictureId);
+        requireDraftRevision(pictureId, expectedRevision);
+        Space space = requireSpace(picture.getSpaceId());
+        PictureStorage.StoredPicture stored = storage.store(image, picture.getSpaceId());
+        try {
+            if ("replace".equals(normalizedMode)) {
+                replaceCurrentPicture(user, picture, space, stored);
+                clearDraft(pictureId);
+                return new M3Dtos.EditorSaveResult("replace", id(pictureId));
+            }
+            Picture copy = savePictureCopy(user, picture, space, stored, name);
+            clearDraft(pictureId);
+            return new M3Dtos.EditorSaveResult("copy", id(copy.getId()));
+        } catch (RuntimeException exception) {
+            storage.delete(stored.objectKey());
+            storage.delete(stored.thumbnailObjectKey());
+            throw exception;
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
     public M3Dtos.VersionDetail restoreVersion(User user, long pictureId, long versionId, Long expectedRevision) {
-        requireOwnedPicture(user, pictureId);
+        Picture picture = requireOwnedPicture(user, pictureId);
         lockPicture(pictureId);
         requireDraftRevision(pictureId, expectedRevision);
         PictureVersion source = requireVersion(pictureId, versionId);
@@ -165,7 +206,8 @@ public class M3Service {
         restored.setNote("恢复自 v" + source.getVersionNumber());
         restored.setSourceType("restore");
         restored.setParentVersionId(source.getId());
-        restored.setEditorState(source.getEditorState());
+        String restoredState = emptyEditorStateJson(valueOrOne(source.getWidth()), valueOrOne(source.getHeight()));
+        restored.setEditorState(restoredState);
         restored.setSchemaVersion(EDITOR_SCHEMA_VERSION);
         restored.setAssetObjectKey(source.getAssetObjectKey());
         restored.setThumbnailObjectKey(source.getThumbnailObjectKey());
@@ -175,7 +217,15 @@ public class M3Service {
         restored.setSize(source.getSize());
         restored.setCreatorId(user.getId());
         versionMapper.insert(restored);
-        saveDraftInternal(pictureId, source.getEditorState(), user.getId(), null, false);
+        if (picture.getSpaceId() == null) throw V1Exception.badRequest("图片尚未绑定可用空间");
+        Space space = requireSpace(picture.getSpaceId());
+        long sizeDelta = nz(source.getSize()) - nz(picture.getPicSize());
+        ensureReplacementCapacity(space, sizeDelta);
+        applyVersionToPicture(picture, source);
+        resetPublication(picture);
+        pictureMapper.updateById(picture);
+        updateSpaceSize(space.getId(), sizeDelta);
+        clearDraft(pictureId);
         return detail(restored);
     }
 
@@ -186,6 +236,174 @@ public class M3Service {
                 ? version.getThumbnailObjectKey() : version.getAssetObjectKey();
         if (key == null || key.isBlank()) throw V1Exception.notFound();
         return storage.load(key);
+    }
+
+    private void replaceCurrentPicture(User user, Picture picture, Space space,
+                                       PictureStorage.StoredPicture stored) {
+        long sizeDelta = stored.size() - nz(picture.getPicSize());
+        ensureReplacementCapacity(space, sizeDelta);
+        int nextVersion = versionMapper.selectMaxVersionNumber(picture.getId()) + 1;
+        if (nextVersion == 1) {
+            if (picture.getObjectKey() == null || picture.getObjectKey().isBlank()) {
+                throw V1Exception.badRequest("当前图片缺少可保存的原始文件");
+            }
+            insertVersionSnapshot(picture.getId(), nextVersion++, "原始图片", "首次替换前自动保存",
+                    "original", null, emptyEditorStateJson(valueOrOne(picture.getPicWidth()),
+                            valueOrOne(picture.getPicHeight())), picture.getObjectKey(),
+                    picture.getThumbnailObjectKey(), picture.getContentType(), valueOrOne(picture.getPicWidth()),
+                    valueOrOne(picture.getPicHeight()), nz(picture.getPicSize()), user.getId());
+        }
+        insertVersionSnapshot(picture.getId(), nextVersion, "保存结果", "替换当前图片",
+                "user_save", null, emptyEditorStateJson(stored.width(), stored.height()), stored.objectKey(),
+                stored.thumbnailObjectKey(), stored.contentType(), stored.width(), stored.height(),
+                stored.size(), user.getId());
+        applyStoredPicture(picture, stored);
+        resetPublication(picture);
+        pictureMapper.updateById(picture);
+        updateSpaceSize(space.getId(), sizeDelta);
+    }
+
+    private Picture savePictureCopy(User user, Picture source, Space space,
+                                    PictureStorage.StoredPicture stored, String name) {
+        if (nz(space.getTotalCount()) >= nz(space.getMaxCount())
+                || nz(space.getTotalSize()) + stored.size() > nz(space.getMaxSize())) {
+            throw V1Exception.conflict("个人空间容量不足");
+        }
+        Picture copy = new Picture();
+        copy.setId(IdWorker.getId());
+        copy.setUrl(assets.privateUrl(copy.getId(), "original"));
+        copy.setThumbnailUrl(assets.privateUrl(copy.getId(), "thumbnail"));
+        copy.setStorageProvider("minio");
+        applyStoredPicture(copy, stored);
+        copy.setName(copyName(source.getName(), name));
+        copy.setIntroduction(source.getIntroduction());
+        copy.setCategory(source.getCategory());
+        copy.setTags(source.getTags());
+        copy.setUserId(user.getId());
+        copy.setSpaceId(space.getId());
+        copy.setVisibility("private");
+        copy.setPublishStatus("not_requested");
+        copy.setReviewStatus(0);
+        copy.setIsDelete(0);
+        pictureMapper.insert(copy);
+        spaceMapper.update(null, new UpdateWrapper<Space>()
+                .eq("id", space.getId())
+                .setSql("totalSize = totalSize + " + stored.size())
+                .setSql("totalCount = totalCount + 1"));
+        return copy;
+    }
+
+    private void insertVersionSnapshot(long pictureId, int versionNumber, String name, String note,
+                                       String sourceType, Long parentVersionId, String editorState,
+                                       String objectKey, String thumbnailObjectKey, String contentType,
+                                       int width, int height, long size, long creatorId) {
+        PictureVersion version = new PictureVersion();
+        version.setPictureId(pictureId);
+        version.setVersionNumber(versionNumber);
+        version.setName(name);
+        version.setNote(note);
+        version.setSourceType(sourceType);
+        version.setParentVersionId(parentVersionId);
+        version.setEditorState(editorState);
+        version.setSchemaVersion(EDITOR_SCHEMA_VERSION);
+        version.setAssetObjectKey(objectKey);
+        version.setThumbnailObjectKey(thumbnailObjectKey);
+        version.setContentType(contentType);
+        version.setWidth(width);
+        version.setHeight(height);
+        version.setSize(size);
+        version.setCreatorId(creatorId);
+        versionMapper.insert(version);
+    }
+
+    private void applyStoredPicture(Picture picture, PictureStorage.StoredPicture stored) {
+        picture.setObjectKey(stored.objectKey());
+        picture.setThumbnailObjectKey(stored.thumbnailObjectKey());
+        picture.setContentType(stored.contentType());
+        picture.setChecksum(stored.checksum());
+        picture.setPicSize(stored.size());
+        picture.setPicWidth(stored.width());
+        picture.setPicHeight(stored.height());
+        picture.setPicScale(Math.round(stored.width() * 100.0 / stored.height()) / 100.0);
+        picture.setPicFormat(stored.format());
+        picture.setPicColor(null);
+        picture.setEditTime(new Date());
+        picture.setUpdateTime(new Date());
+    }
+
+    private void applyVersionToPicture(Picture picture, PictureVersion version) {
+        int width = valueOrOne(version.getWidth());
+        int height = valueOrOne(version.getHeight());
+        picture.setObjectKey(version.getAssetObjectKey());
+        picture.setThumbnailObjectKey(version.getThumbnailObjectKey());
+        picture.setContentType(version.getContentType());
+        picture.setChecksum(null);
+        picture.setPicSize(nz(version.getSize()));
+        picture.setPicWidth(width);
+        picture.setPicHeight(height);
+        picture.setPicScale(Math.round(width * 100.0 / height) / 100.0);
+        picture.setPicFormat(formatFromContentType(version.getContentType()));
+        picture.setPicColor(null);
+        picture.setEditTime(new Date());
+        picture.setUpdateTime(new Date());
+    }
+
+    private void resetPublication(Picture picture) {
+        publishRequestMapper.update(null, new UpdateWrapper<PublishRequest>()
+                .eq("pictureId", picture.getId())
+                .eq("status", "pending")
+                .set("status", "withdrawn")
+                .set("decisionReason", "图片内容已替换，请重新申请公开")
+                .set("reviewTime", LocalDateTime.now()));
+        picture.setVisibility("private");
+        picture.setPublishStatus("not_requested");
+        picture.setPublishedAt(null);
+        picture.setReviewStatus(0);
+        picture.setReviewMessage(null);
+        picture.setReviewerId(null);
+        picture.setReviewTime(null);
+    }
+
+    private void ensureReplacementCapacity(Space space, long sizeDelta) {
+        if (nz(space.getTotalSize()) + sizeDelta > nz(space.getMaxSize())) {
+            throw V1Exception.conflict("个人空间容量不足");
+        }
+    }
+
+    private void updateSpaceSize(long spaceId, long sizeDelta) {
+        if (sizeDelta == 0) return;
+        spaceMapper.update(null, new UpdateWrapper<Space>()
+                .eq("id", spaceId)
+                .setSql("totalSize = GREATEST(0, totalSize + (" + sizeDelta + "))"));
+    }
+
+    private Space requireSpace(long spaceId) {
+        Space space = spaceMapper.selectById(spaceId);
+        if (space == null || Integer.valueOf(1).equals(space.getIsDelete())) throw V1Exception.notFound();
+        return space;
+    }
+
+    private void clearDraft(long pictureId) {
+        PictureDraft draft = findDraft(pictureId);
+        if (draft != null) draftMapper.deleteById(draft.getId());
+    }
+
+    private String emptyEditorStateJson(int width, int height) {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("schemaVersion", EDITOR_SCHEMA_VERSION);
+        ObjectNode canvas = root.putObject("canvas");
+        canvas.put("width", Math.max(1, width));
+        canvas.put("height", Math.max(1, height));
+        ObjectNode transform = root.putObject("transform");
+        transform.put("rotation", 0);
+        transform.put("scale", 1);
+        transform.put("flipX", false);
+        transform.put("flipY", false);
+        root.putNull("crop");
+        ObjectNode adjustments = root.putObject("adjustments");
+        for (String field : ADJUSTMENT_FIELDS) adjustments.put(field, 0);
+        root.putArray("layers");
+        return root.toString();
     }
 
     private PictureDraft saveDraftInternal(long pictureId, String editorState, long updatedBy,
@@ -273,7 +491,7 @@ public class M3Service {
     private String normalizeEditorState(Object editorState) {
         if (editorState == null) throw V1Exception.badRequest("编辑器状态不能为空");
         try {
-            JsonNode node = objectMapper.valueToTree(editorState);
+            JsonNode node = migrateEditorStateNode(objectMapper.valueToTree(editorState));
             validateEditorStateNode(node);
             String json = objectMapper.writeValueAsString(node);
             if (json.length() > MAX_EDITOR_STATE_CHARS) throw V1Exception.badRequest("编辑器状态过大");
@@ -286,7 +504,7 @@ public class M3Service {
     private String normalizeEditorStateJson(String editorState) {
         if (editorState == null || editorState.isBlank()) throw V1Exception.badRequest("编辑器状态不能为空");
         try {
-            JsonNode node = objectMapper.readTree(editorState);
+            JsonNode node = migrateEditorStateNode(objectMapper.readTree(editorState));
             validateEditorStateNode(node);
             String json = objectMapper.writeValueAsString(node);
             if (json.length() > MAX_EDITOR_STATE_CHARS) throw V1Exception.badRequest("编辑器状态过大");
@@ -299,7 +517,7 @@ public class M3Service {
     private JsonNode parseEditorState(String editorState) {
         if (editorState == null || editorState.isBlank()) throw V1Exception.badRequest("编辑器状态为空");
         try {
-            JsonNode node = objectMapper.readTree(editorState);
+            JsonNode node = migrateEditorStateNode(objectMapper.readTree(editorState));
             validateEditorStateNode(node);
             return node;
         } catch (JsonProcessingException | IllegalArgumentException exception) {
@@ -320,9 +538,11 @@ public class M3Service {
         int canvasHeight = requireInteger(canvas, "height", 1, 32_768);
 
         JsonNode transform = requireObject(node, "transform");
-        requireExactFields(transform, Set.of("rotation", "scale"), "变换字段无效");
+        requireExactFields(transform, Set.of("rotation", "scale", "flipX", "flipY"), "变换字段无效");
         requireNumber(transform, "rotation", -360, 360);
         requireNumber(transform, "scale", 0.25, 4);
+        requireBoolean(transform, "flipX");
+        requireBoolean(transform, "flipY");
 
         JsonNode crop = node.get("crop");
         if (crop == null || (!crop.isNull() && !crop.isObject())) throw V1Exception.badRequest("裁切区域无效");
@@ -358,11 +578,14 @@ public class M3Service {
         requireNumber(layer, "left", -1_000_000, 1_000_000);
         requireNumber(layer, "top", -1_000_000, 1_000_000);
         requireNumber(layer, "angle", -36_000, 36_000);
-        requireNumber(layer, "scaleX", Double.MIN_VALUE, 100);
-        requireNumber(layer, "scaleY", Double.MIN_VALUE, 100);
+        requireNumber(layer, "scaleX", 0.01, 100);
+        requireNumber(layer, "scaleY", 0.01, 100);
+        requireBoolean(layer, "flipX");
+        requireBoolean(layer, "flipY");
         if ("text".equals(type)) {
             requireText(layer, "text", 0, 2_000);
             requireNumber(layer, "fontSize", 8, 512);
+            requireNumber(layer, "width", 1, 32_768);
             requireColor(layer, "color");
             requireText(layer, "fontFamily", 1, 128);
             requireText(layer, "fontWeight", 1, 32);
@@ -419,6 +642,46 @@ public class M3Service {
         return number;
     }
 
+    private static boolean requireBoolean(JsonNode parent, String field) {
+        JsonNode value = parent.get(field);
+        if (value == null || !value.isBoolean()) throw V1Exception.badRequest(field + " 必须是布尔值");
+        return value.booleanValue();
+    }
+
+    private JsonNode migrateEditorStateNode(JsonNode source) {
+        if (source == null || !source.isObject()) return source;
+        JsonNode version = source.get("schemaVersion");
+        if (version == null || !version.canConvertToInt() || version.intValue() != 2) return source;
+
+        ObjectNode migrated = source.deepCopy();
+        migrated.put("schemaVersion", EDITOR_SCHEMA_VERSION);
+        JsonNode transformValue = migrated.get("transform");
+        if (transformValue instanceof ObjectNode transform) {
+            transform.put("flipX", false);
+            transform.put("flipY", false);
+        }
+        JsonNode layersValue = migrated.get("layers");
+        if (layersValue instanceof ArrayNode layers) {
+            for (JsonNode value : layers) {
+                if (!(value instanceof ObjectNode layer)) continue;
+                migrateLayerScale(layer, "scaleX", "flipX");
+                migrateLayerScale(layer, "scaleY", "flipY");
+                if ("text".equals(layer.path("type").asText())) {
+                    double fontSize = layer.path("fontSize").isNumber() ? layer.path("fontSize").doubleValue() : 32;
+                    int characters = Math.max(1, layer.path("text").asText("").codePointCount(0, layer.path("text").asText("").length()));
+                    layer.put("width", Math.max(120, Math.min(32_768, characters * fontSize * 0.62)));
+                }
+            }
+        }
+        return migrated;
+    }
+
+    private static void migrateLayerScale(ObjectNode layer, String scaleField, String flipField) {
+        double scale = layer.path(scaleField).isNumber() ? layer.path(scaleField).doubleValue() : 1;
+        layer.put(scaleField, Math.max(0.01, Math.min(100, Math.abs(scale))));
+        layer.put(flipField, scale < 0);
+    }
+
     private static String requireText(JsonNode parent, String field, int minLength, int maxLength) {
         JsonNode value = parent.get(field);
         if (value == null || !value.isTextual()) throw V1Exception.badRequest(field + " 必须是字符串");
@@ -444,6 +707,32 @@ public class M3Service {
         return value;
     }
 
+    private static String normalizeSaveMode(String mode) {
+        if ("replace".equals(mode) || "copy".equals(mode)) return mode;
+        throw V1Exception.badRequest("保存方式无效");
+    }
+
+    private static String copyName(String sourceName, String requestedName) {
+        if (requestedName != null && !requestedName.isBlank()) {
+            String value = requestedName.trim();
+            if (value.length() > 128) throw V1Exception.badRequest("图片名称不能超过 128 个字符");
+            return value;
+        }
+        String suffix = " - 副本";
+        String base = sourceName == null || sourceName.isBlank() ? "未命名图片" : sourceName.trim();
+        return base.substring(0, Math.min(base.length(), 128 - suffix.length())) + suffix;
+    }
+
+    private static String formatFromContentType(String contentType) {
+        if (contentType == null) return null;
+        return switch (contentType.toLowerCase()) {
+            case "image/jpeg" -> "jpg";
+            case "image/png" -> "png";
+            case "image/webp" -> "webp";
+            default -> null;
+        };
+    }
+
     private static String normalizedVariant(String variant) {
         if (variant == null || variant.isBlank() || "original".equals(variant)) return "original";
         if ("thumbnail".equals(variant)) return "thumbnail";
@@ -451,7 +740,9 @@ public class M3Service {
     }
 
     private static String id(Long value) { return value == null ? null : value.toString(); }
+    private static long nz(Long value) { return value == null ? 0 : value; }
     private static int valueOrZero(Integer value) { return value == null ? 0 : value; }
+    private static int valueOrOne(Integer value) { return value == null || value < 1 ? 1 : value; }
     private static String blankToNull(String value) { return value == null || value.isBlank() ? null : value.trim(); }
     private static Instant instant(Date value) { return value == null ? null : value.toInstant(); }
 }
