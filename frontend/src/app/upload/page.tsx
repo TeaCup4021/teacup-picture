@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function UploadPage() {
-  return <UploadScreen />;
+export default async function UploadPage({ searchParams }: { searchParams: Promise<{ spaceId?: string }> }) {
+  const { spaceId } = await searchParams;
+  return <UploadScreen spaceId={spaceId} />;
 }

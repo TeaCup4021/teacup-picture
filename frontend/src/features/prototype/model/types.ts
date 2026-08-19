@@ -43,6 +43,7 @@ export interface UploadPictureInput {
   imageUrl?: string;
   category: string;
   tags: string[];
+  spaceId?: string;
 }
 
 export interface RegisterInput {

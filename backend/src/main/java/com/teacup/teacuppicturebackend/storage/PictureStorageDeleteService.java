@@ -21,10 +21,17 @@ public class PictureStorageDeleteService {
 
     @Transactional
     public void enqueue(Picture picture) {
-        if (picture == null || picture.getObjectKey() == null || picture.getObjectKey().isBlank()) return;
+        if (picture == null) return;
+        enqueueAssets(picture.getId(), picture.getObjectKey(), picture.getThumbnailObjectKey());
+    }
+
+    /** Inserts a durable cleanup task in the caller's transaction. */
+    @Transactional
+    public void enqueueAssets(Long pictureId, String objectKey, String thumbnailObjectKey) {
+        if (objectKey == null || objectKey.isBlank()) return;
         StorageDeleteOutbox row = new StorageDeleteOutbox();
-        row.setPictureId(picture.getId()); row.setObjectKey(picture.getObjectKey());
-        row.setThumbnailObjectKey(picture.getThumbnailObjectKey()); row.setStatus("pending");
+        row.setPictureId(pictureId); row.setObjectKey(objectKey);
+        row.setThumbnailObjectKey(thumbnailObjectKey); row.setStatus("pending");
         row.setRetryCount(0); row.setNextAttemptAt(new Date()); outboxMapper.insert(row);
     }
 

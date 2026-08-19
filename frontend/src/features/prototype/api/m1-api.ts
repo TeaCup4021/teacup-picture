@@ -106,8 +106,10 @@ export const m1Api = {
       catch (publicError) { if (publicError instanceof ApiError && publicError.status === 404) return null; throw publicError; }
     }
   },
-  async getPersonalPictures(): Promise<PrototypePicture[]> {
-    const page = await get<ApiPage<ApiPicture>>("/pictures?page=1&pageSize=100");
+  async getPersonalPictures(spaceId?: string): Promise<PrototypePicture[]> {
+    const query = new URLSearchParams({ page: "1", pageSize: "100" });
+    if (spaceId) query.set("spaceId", spaceId);
+    const page = await get<ApiPage<ApiPicture>>(`/pictures?${query.toString()}`);
     return page.items.map((item) => picture(item));
   },
   async uploadPicture(input: UploadPictureInput): Promise<PrototypePicture> {
@@ -115,6 +117,7 @@ export const m1Api = {
     if (input.file) {
       const data = new FormData(); data.append("file", input.file); data.append("name", input.title);
       data.append("introduction", input.description); data.append("category", input.category);
+      if (input.spaceId) data.append("spaceId", input.spaceId);
       input.tags.forEach((tag) => data.append("tags", tag));
       result = unwrapApiResponse((await apiClient.post<ApiEnvelope<ApiPicture>>("/pictures/uploads", data)).data);
     } else {
@@ -124,6 +127,7 @@ export const m1Api = {
         introduction: input.description,
         category: input.category,
         tags: input.tags,
+        spaceId: input.spaceId,
       });
     }
     return picture(result);

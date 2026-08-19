@@ -42,7 +42,8 @@ public class PersonalSpaceServiceImpl implements PersonalSpaceService {
                 .setMaxCount(level.getMaxCount())
                 .setTotalSize(0L)
                 .setTotalCount(0L)
-                .setUserId(userId);
+                .setUserId(userId)
+                .setOwnerId(userId);
 
         try {
             if (spaceMapper.insert(personalSpace) != 1) {

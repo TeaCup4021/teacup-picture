@@ -3,6 +3,7 @@ package com.teacup.teacuppicturebackend.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.teacup.teacuppicturebackend.model.entity.Picture;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Select;
 
 /**
@@ -15,4 +16,7 @@ public interface PictureMapper extends BaseMapper<Picture> {
 
     @Select("SELECT id FROM picture WHERE id = #{pictureId} AND isDelete = 0 FOR UPDATE")
     Long lockPictureForUpdate(@Param("pictureId") long pictureId);
+
+    @Delete("DELETE FROM picture WHERE spaceId = #{spaceId}")
+    int purgeBySpaceId(@Param("spaceId") long spaceId);
 }

@@ -26,6 +26,7 @@ import com.teacup.teacuppicturebackend.service.UserService;
 import com.teacup.teacuppicturebackend.storage.PictureAssetService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -64,11 +65,13 @@ public class M3Service {
     private final PictureStorage storage;
     private final PictureAssetService assets;
     private final ObjectMapper objectMapper;
+    private final SpaceAccessService spaceAccess;
 
+    @Autowired
     public M3Service(PictureMapper pictureMapper, PictureDraftMapper draftMapper, PictureVersionMapper versionMapper,
                      PublishRequestMapper publishRequestMapper, SpaceMapper spaceMapper,
                      UserMapper userMapper, UserService userService, PictureStorage storage,
-                     PictureAssetService assets, ObjectMapper objectMapper) {
+                     PictureAssetService assets, ObjectMapper objectMapper, SpaceAccessService spaceAccess) {
         this.pictureMapper = pictureMapper;
         this.draftMapper = draftMapper;
         this.versionMapper = versionMapper;
@@ -79,10 +82,20 @@ public class M3Service {
         this.storage = storage;
         this.assets = assets;
         this.objectMapper = objectMapper;
+        this.spaceAccess = spaceAccess;
+    }
+
+    /** Kept for pre-M4 focused unit tests; runtime injection uses SpaceAccessService. */
+    public M3Service(PictureMapper pictureMapper, PictureDraftMapper draftMapper, PictureVersionMapper versionMapper,
+                     PublishRequestMapper publishRequestMapper, SpaceMapper spaceMapper,
+                     UserMapper userMapper, UserService userService, PictureStorage storage,
+                     PictureAssetService assets, ObjectMapper objectMapper) {
+        this(pictureMapper, draftMapper, versionMapper, publishRequestMapper, spaceMapper, userMapper,
+                userService, storage, assets, objectMapper, null);
     }
 
     public M3Dtos.EditorStateView getDraft(User user, long pictureId) {
-        requireOwnedPicture(user, pictureId);
+        requirePicture(user, pictureId, false);
         PictureDraft draft = findDraft(pictureId);
         return new M3Dtos.EditorStateView(
                 draft == null ? null : parseEditorState(draft.getEditorState()),
@@ -92,7 +105,7 @@ public class M3Service {
 
     @Transactional(rollbackFor = Exception.class)
     public M3Dtos.EditorStateView saveDraft(User user, long pictureId, Object editorState, Long expectedRevision) {
-        requireOwnedPicture(user, pictureId);
+        requirePicture(user, pictureId, true);
         String json = normalizeEditorState(editorState);
         lockPicture(pictureId);
         PictureDraft saved = saveDraftInternal(pictureId, json, user.getId(), expectedRevision, true);
@@ -101,7 +114,7 @@ public class M3Service {
 
     @Transactional(rollbackFor = Exception.class)
     public M3Dtos.EditorStateView deleteDraft(User user, long pictureId, Long expectedRevision) {
-        requireOwnedPicture(user, pictureId);
+        requirePicture(user, pictureId, true);
         lockPicture(pictureId);
         PictureDraft draft = findDraft(pictureId);
         if (draft == null) {
@@ -114,7 +127,7 @@ public class M3Service {
     }
 
     public M3Dtos.VersionList listVersions(User user, long pictureId) {
-        requireOwnedPicture(user, pictureId);
+        requirePicture(user, pictureId, false);
         List<PictureVersion> versions = versionMapper.selectList(new LambdaQueryWrapper<PictureVersion>()
                 .eq(PictureVersion::getPictureId, pictureId)
                 .orderByDesc(PictureVersion::getVersionNumber)
@@ -123,14 +136,14 @@ public class M3Service {
     }
 
     public M3Dtos.VersionDetail getVersion(User user, long pictureId, long versionId) {
-        requireOwnedPicture(user, pictureId);
+        requirePicture(user, pictureId, false);
         return detail(requireVersion(pictureId, versionId));
     }
 
     @Transactional(rollbackFor = Exception.class)
     public M3Dtos.VersionDetail createVersion(User user, long pictureId, MultipartFile preview,
                                               String editorState, String name, String note, String sourceType) {
-        Picture picture = requireOwnedPicture(user, pictureId);
+        Picture picture = requirePicture(user, pictureId, true);
         if (preview == null || preview.isEmpty()) throw V1Exception.badRequest("版本预览图不能为空");
         if (picture.getSpaceId() == null) throw V1Exception.badRequest("图片尚未绑定可用空间");
         String json = normalizeEditorStateJson(editorState);
@@ -167,7 +180,7 @@ public class M3Service {
     @Transactional(rollbackFor = Exception.class)
     public M3Dtos.EditorSaveResult saveEditorResult(User user, long pictureId, MultipartFile image,
                                                      String mode, String name, Long expectedRevision) {
-        Picture picture = requireOwnedPicture(user, pictureId);
+        Picture picture = requirePicture(user, pictureId, true);
         if (image == null || image.isEmpty()) throw V1Exception.badRequest("保存图片不能为空");
         String normalizedMode = normalizeSaveMode(mode);
         if (picture.getSpaceId() == null) throw V1Exception.badRequest("图片尚未绑定可用空间");
@@ -193,7 +206,7 @@ public class M3Service {
 
     @Transactional(rollbackFor = Exception.class)
     public M3Dtos.VersionDetail restoreVersion(User user, long pictureId, long versionId, Long expectedRevision) {
-        Picture picture = requireOwnedPicture(user, pictureId);
+        Picture picture = requirePicture(user, pictureId, true);
         lockPicture(pictureId);
         requireDraftRevision(pictureId, expectedRevision);
         PictureVersion source = requireVersion(pictureId, versionId);
@@ -230,7 +243,7 @@ public class M3Service {
     }
 
     public PictureStorage.StoredObject loadVersionContent(User user, long pictureId, long versionId, String variant) {
-        requireOwnedPicture(user, pictureId);
+        requirePicture(user, pictureId, false);
         PictureVersion version = requireVersion(pictureId, versionId);
         String key = "thumbnail".equals(normalizedVariant(variant)) && version.getThumbnailObjectKey() != null
                 ? version.getThumbnailObjectKey() : version.getAssetObjectKey();
@@ -445,10 +458,15 @@ public class M3Service {
                 .eq(PictureDraft::getPictureId, pictureId).last("LIMIT 1"));
     }
 
-    private Picture requireOwnedPicture(User user, long pictureId) {
+    private Picture requirePicture(User user, long pictureId, boolean editable) {
         Picture picture = pictureMapper.selectById(pictureId);
         if (picture == null || Integer.valueOf(1).equals(picture.getIsDelete())) throw V1Exception.notFound();
-        if (!Objects.equals(picture.getUserId(), user.getId()) && !userService.isAdmin(user)) {
+        if (spaceAccess == null) {
+            if (!Objects.equals(picture.getUserId(), user.getId()) && !userService.isAdmin(user)) throw V1Exception.notFound();
+            return picture;
+        }
+        Space space = spaceMapper.selectById(picture.getSpaceId());
+        if (space == null || (editable ? !spaceAccess.canEdit(user, space) : !spaceAccess.canView(user, space))) {
             throw V1Exception.notFound();
         }
         return picture;

@@ -425,13 +425,13 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                         .update();
                 ThrowUtils.throwIf(!update, ErrorCode.OPERATION_ERROR, "额度更新失败");
             }
+            pictureStorageDeleteService.enqueue(oldPicture);
             return true;
         });
         ClearEvent deleteEvent = ClearEvent.of("DELETE", "PICTURE", pictureId);
         if (pictureCacheClearObserver.supports(deleteEvent)) {
             pictureCacheClearObserver.handleClearEvent(deleteEvent);
         }
-        pictureStorageDeleteService.enqueue(oldPicture);
         return true;
 
     }

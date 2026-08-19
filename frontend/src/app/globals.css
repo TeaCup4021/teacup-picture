@@ -230,6 +230,17 @@ select {
   backdrop-filter: blur(12px);
 }
 
+.workspace-header > .ant-btn {
+  color: var(--app-muted);
+}
+
+.workspace-breadcrumb {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workspace-page {
   animation: page-enter var(--ui-motion-page) var(--ui-motion-emphasized) both;
 }
@@ -288,6 +299,133 @@ select {
 
 .page-heading .gallery-lead + p {
   margin-top: 3px;
+}
+
+.team-shell {
+  padding-bottom: 72px;
+}
+
+.team-space-list {
+  display: grid;
+  gap: 10px;
+  padding-top: 24px;
+}
+
+.team-space-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto minmax(150px, 220px);
+  gap: 16px;
+  align-items: center;
+  min-height: 82px;
+  padding: 16px 18px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--ui-radius-panel);
+  background: var(--app-surface);
+  color: var(--app-text);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.team-space-row:hover {
+  border-color: var(--app-accent);
+  box-shadow: 0 8px 24px rgb(38 75 112 / 9%);
+  transform: translateY(-1px);
+}
+
+.team-space-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 10px;
+  background: #eaf2ff;
+  color: var(--app-accent);
+  font-size: 19px;
+}
+
+.team-space-main,
+.team-space-usage {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.team-space-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-space-main span,
+.team-space-usage small {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.team-space-usage .ant-progress {
+  margin: 0;
+}
+
+.team-empty-icon {
+  color: #9ab0c8;
+  font-size: 44px;
+}
+
+.team-section-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.team-members .ant-list-item {
+  padding: 14px 0;
+}
+
+.team-settings {
+  display: grid;
+  max-width: 680px;
+  gap: 14px;
+  padding: 20px 0;
+}
+
+.team-settings h2,
+.notification-section h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.team-settings p {
+  margin: 0;
+  color: var(--app-muted);
+  line-height: 1.7;
+}
+
+.team-settings .ant-btn {
+  justify-self: start;
+}
+
+.invite-role-select {
+  width: 100%;
+  margin: 16px 0 8px;
+}
+
+.notifications-shell {
+  display: grid;
+  gap: 24px;
+}
+
+.notification-section {
+  padding-top: 22px;
+}
+
+.notification-section .ant-list {
+  margin-top: 10px;
+}
+
+.notification-section .ant-list-item.is-unread {
+  margin-inline: -12px;
+  padding-inline: 12px;
+  border-radius: 8px;
+  background: #f1f6ff;
 }
 
 .result-count,
@@ -1172,6 +1310,14 @@ select {
   .review-detail-media {
     min-height: 280px;
   }
+
+  .team-space-row {
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+  }
+
+  .team-space-usage {
+    grid-column: 2 / -1;
+  }
 }
 
 @media (max-width: 560px) {
@@ -1296,6 +1442,35 @@ select {
   }
   .review-detail-actions {
     grid-template-columns: 1fr;
+  }
+
+  .team-space-row {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .team-space-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .team-space-row .ant-tag {
+    max-width: 68px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .team-space-usage {
+    grid-column: 1 / -1;
+  }
+
+  .notification-section .ant-list-item {
+    align-items: flex-start;
+  }
+
+  .notification-section .ant-list-item-action {
+    margin-inline-start: 8px;
   }
 }
 

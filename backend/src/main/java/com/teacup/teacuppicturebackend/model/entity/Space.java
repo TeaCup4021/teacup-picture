@@ -53,6 +53,9 @@ public class Space implements Serializable {
     @ApiModelProperty(value = "创建用户 id")
     private Long userId;
 
+    /** Team-space ownership fact. userId remains the historical creator field. */
+    private Long ownerId;
+
     @ApiModelProperty(value = "创建时间")
     private LocalDateTime createTime;
 

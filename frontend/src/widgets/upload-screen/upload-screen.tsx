@@ -54,7 +54,7 @@ export function normalizePictureUrl(value: string): string {
   return normalized;
 }
 
-export function UploadScreen() {
+export function UploadScreen({ spaceId }: { spaceId?: string }) {
   const { message } = App.useApp();
   const [form] = Form.useForm<UploadFormValues>();
   const [mode, setMode] = useState<"local" | "url">("local");
@@ -133,11 +133,12 @@ export function UploadScreen() {
               .map((tag) => tag.trim())
               .filter(Boolean)
           : [],
+        spaceId,
       },
       {
         onSuccess: (picture) => {
-          void message.success("图片已保存到个人空间");
-          router.push(`/pictures/${picture.id}`);
+          void message.success(spaceId ? "图片已保存到团队空间" : "图片已保存到个人空间");
+          router.push(spaceId ? `/spaces/${spaceId}` : `/pictures/${picture.id}`);
         },
         onError: (error) => void message.error(error.message),
       },
@@ -172,7 +173,7 @@ export function UploadScreen() {
         <div>
           <p className="page-kicker">UPLOAD</p>
           <h1 id="upload-title">上传图片</h1>
-          <p>图片默认保存到个人空间</p>
+          <p>{spaceId ? "图片将保存到当前团队空间" : "图片默认保存到个人空间"}</p>
         </div>
       </section>
       <div className="upload-layout">
@@ -261,7 +262,7 @@ export function UploadScreen() {
               icon={<UploadOutlined />}
               loading={upload.isPending}
             >
-              保存到个人空间
+              {spaceId ? "保存到团队空间" : "保存到个人空间"}
             </Button>
           </Form>
         </section>

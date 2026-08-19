@@ -2,6 +2,8 @@ package com.teacup.teacuppicturebackend.mapper;
 
 import com.teacup.teacuppicturebackend.model.entity.SpaceUser;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
+import org.apache.ibatis.annotations.Param;
 
 /**
  * <p>
@@ -14,4 +16,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 public interface SpaceUserMapper extends BaseMapper<SpaceUser> {
 
     Boolean save(SpaceUser spaceUser);
+
+    @Delete("DELETE FROM space_user WHERE spaceId = #{spaceId}")
+    int deleteBySpaceId(@Param("spaceId") long spaceId);
 }

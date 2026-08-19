@@ -19,6 +19,7 @@ import com.teacup.teacuppicturebackend.service.UserService;
 import com.teacup.teacuppicturebackend.storage.PictureAssetService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -45,10 +46,13 @@ public class M1Service {
     private final UserMapper userMapper;
     private final PictureStorage storage;
     private final PictureAssetService assets;
+    private final SpaceAccessService spaceAccess;
 
+    @Autowired
     public M1Service(UserService userService, PersonalSpaceService personalSpaceService, SpaceService spaceService,
                      PictureMapper pictureMapper, PublishRequestMapper publishRequestMapper,
-                     UserMapper userMapper, PictureStorage storage, PictureAssetService assets) {
+                      UserMapper userMapper, PictureStorage storage, PictureAssetService assets,
+                      SpaceAccessService spaceAccess) {
         this.userService = userService;
         this.personalSpaceService = personalSpaceService;
         this.spaceService = spaceService;
@@ -57,6 +61,15 @@ public class M1Service {
         this.userMapper = userMapper;
         this.storage = storage;
         this.assets = assets;
+        this.spaceAccess = spaceAccess;
+    }
+
+    /** Kept for pre-M4 focused unit tests; runtime injection uses SpaceAccessService. */
+    public M1Service(UserService userService, PersonalSpaceService personalSpaceService, SpaceService spaceService,
+                     PictureMapper pictureMapper, PublishRequestMapper publishRequestMapper,
+                     UserMapper userMapper, PictureStorage storage, PictureAssetService assets) {
+        this(userService, personalSpaceService, spaceService, pictureMapper, publishRequestMapper,
+                userMapper, storage, assets, null);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -116,7 +129,7 @@ public class M1Service {
     @Transactional(rollbackFor = Exception.class)
     public M1Dtos.PictureDetail upload(User user, MultipartFile file, String spaceId, String name,
                                        String introduction, String category, List<String> tags) {
-        Space space = resolveOwnedSpace(user, spaceId);
+        Space space = resolveSpace(user, spaceId, "upload");
         PictureStorage.StoredPicture stored = storage.store(file, space.getId());
         return savePictureWithCompensation(user, space, stored, name, introduction, category, tags);
     }
@@ -124,7 +137,7 @@ public class M1Service {
     @Transactional(rollbackFor = Exception.class)
     public M1Dtos.PictureDetail importUrl(User user, M1Dtos.UrlImportRequest request) {
         if (request == null || request.url() == null || request.url().isBlank()) throw V1Exception.badRequest("图片 URL 不能为空");
-        Space space = resolveOwnedSpace(user, request.spaceId());
+        Space space = resolveSpace(user, request.spaceId(), "upload");
         PictureStorage.StoredPicture stored = storage.importUrl(request.url(), space.getId());
         return savePictureWithCompensation(user, space, stored, request.name(), request.introduction(), request.category(), request.tags());
     }
@@ -155,7 +168,7 @@ public class M1Service {
 
     public M1Dtos.PicturePage listPictures(User user, int page, int pageSize, String spaceId) {
         validatePage(page, pageSize);
-        Space space = resolveOwnedSpace(user, spaceId);
+        Space space = resolveSpace(user, spaceId, "view");
         Page<Picture> result = pictureMapper.selectPage(new Page<>(page, pageSize), new LambdaQueryWrapper<Picture>()
                 .eq(Picture::getSpaceId, space.getId()).eq(Picture::getIsDelete, 0)
                 .orderByDesc(Picture::getCreateTime).orderByDesc(Picture::getId));
@@ -164,13 +177,13 @@ public class M1Service {
     }
 
     public M1Dtos.PictureDetail getPicture(User user, long pictureId) {
-        Picture picture = ownedPicture(user, pictureId);
-        return detail(picture, userMapper.selectById(picture.getUserId()));
+        Picture picture = picture(user, pictureId, "view");
+        return detail(picture, userMapper.selectById(picture.getUserId()), user);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public M1Dtos.PublishRequestView requestPublication(User user, long pictureId) {
-        Picture picture = ownedPicture(user, pictureId);
+        Picture picture = picture(user, pictureId, "edit");
         if ("pending".equals(picture.getPublishStatus())) throw V1Exception.conflict("图片已有待审核申请");
         if ("approved".equals(picture.getPublishStatus())) throw V1Exception.conflict("图片已经公开");
         PublishRequest request = new PublishRequest();
@@ -276,13 +289,29 @@ public class M1Service {
         return detail(picture, user);
     }
 
-    private Space resolveOwnedSpace(User user, String spaceId) {
+    private Space resolveSpace(User user, String spaceId, String action) {
         Space space = spaceId == null || spaceId.isBlank() ? personalSpaceService.getOrCreatePersonalSpace(user.getId()) : spaceService.getById(parseId(spaceId));
         if (space == null) throw V1Exception.notFound();
-        if (!Objects.equals(space.getUserId(), user.getId())) throw V1Exception.forbidden();
+        if (spaceAccess == null) {
+            if (!Objects.equals(space.getUserId(), user.getId())) throw V1Exception.forbidden();
+        } else if (("upload".equals(action) && !spaceAccess.canUpload(user, space)) ||
+                ("view".equals(action) && !spaceAccess.canView(user, space))) {
+            throw V1Exception.forbidden();
+        }
         return space;
     }
-    private Picture ownedPicture(User user, long pictureId) { Picture picture = requirePicture(pictureId); if (!Objects.equals(picture.getUserId(), user.getId()) && !userService.isAdmin(user)) throw V1Exception.notFound(); return picture; }
+    private Picture picture(User user, long pictureId, String action) {
+        Picture picture = requirePicture(pictureId);
+        if (spaceAccess == null) {
+            if (!Objects.equals(picture.getUserId(), user.getId()) && !userService.isAdmin(user)) throw V1Exception.notFound();
+            return picture;
+        }
+        Space space = spaceService.getById(picture.getSpaceId());
+        if (space == null || ("view".equals(action) ? !spaceAccess.canView(user, space) : !spaceAccess.canEdit(user, space))) {
+            throw V1Exception.notFound();
+        }
+        return picture;
+    }
     private Picture requirePicture(long id) { Picture p = pictureMapper.selectById(id); if (p == null || Integer.valueOf(1).equals(p.getIsDelete())) throw V1Exception.notFound(); return p; }
     private PublishRequest requireRequest(long id) { PublishRequest r = publishRequestMapper.selectById(id); if (r == null) throw V1Exception.notFound(); return r; }
     private void requireAdmin(User user) { if (!userService.isAdmin(user)) throw V1Exception.forbidden(); }
@@ -290,7 +319,16 @@ public class M1Service {
     private M1Dtos.PublishRequestView publishView(PublishRequest request) { Picture picture = requirePicture(request.getPictureId()); return publishView(request, picture, userMapper.selectById(request.getRequesterId()), request.getReviewerId() == null ? null : userMapper.selectById(request.getReviewerId())); }
     private M1Dtos.PublishRequestView publishView(PublishRequest request, Picture picture, User requester, User reviewer) { return new M1Dtos.PublishRequestView(id(request.getId()), summary(picture, userMapper.selectById(picture.getUserId())), author(requester), request.getStatus(), reviewer == null ? null : author(reviewer), request.getDecisionReason(), instant(request.getCreateTime()), instant(request.getReviewTime())); }
     private M1Dtos.PictureSummary summary(Picture p, User author) { return new M1Dtos.PictureSummary(id(p.getId()), id(p.getSpaceId()), assets.privateUrl(p.getId(), "thumbnail"), p.getName(), p.getIntroduction(), p.getCategory(), tags(p), nz(p.getPicSize()), nzi(p.getPicWidth()), nzi(p.getPicHeight()), p.getPicFormat(), p.getPicColor(), p.getVisibility(), p.getPublishStatus(), author(author), instant(p.getCreateTime()), instant(p.getUpdateTime())); }
-    private M1Dtos.PictureDetail detail(Picture p, User author) { M1Dtos.PictureSummary s = summary(p, author); return new M1Dtos.PictureDetail(s.id(), s.spaceId(), s.thumbnailUrl(), s.name(), s.introduction(), s.category(), s.tags(), s.size(), s.width(), s.height(), s.format(), s.dominantColor(), s.visibility(), s.publishStatus(), s.author(), s.createdAt(), s.updatedAt(), assets.privateUrl(p.getId(), "original"), OWNER_PERMISSIONS, "rejected".equals(p.getPublishStatus()) ? p.getReviewMessage() : null, instant(p.getReviewTime())); }
+    private M1Dtos.PictureDetail detail(Picture p, User author) { return detail(p, author, author); }
+    private M1Dtos.PictureDetail detail(Picture p, User author, User viewer) {
+        M1Dtos.PictureSummary s = summary(p, author);
+        List<String> permissions = OWNER_PERMISSIONS;
+        if (spaceAccess != null && p.getSpaceId() != null) {
+            Space space = spaceService.getById(p.getSpaceId());
+            permissions = space == null ? List.of() : spaceAccess.permissions(viewer, space);
+        }
+        return new M1Dtos.PictureDetail(s.id(), s.spaceId(), s.thumbnailUrl(), s.name(), s.introduction(), s.category(), s.tags(), s.size(), s.width(), s.height(), s.format(), s.dominantColor(), s.visibility(), s.publishStatus(), s.author(), s.createdAt(), s.updatedAt(), assets.privateUrl(p.getId(), "original"), permissions, "rejected".equals(p.getPublishStatus()) ? p.getReviewMessage() : null, instant(p.getReviewTime()));
+    }
     private M1Dtos.PublicPictureSummary publicSummary(Picture p, User user) { return new M1Dtos.PublicPictureSummary(id(p.getId()), assets.publicUrl(p.getId(), "thumbnail"), p.getName(), p.getIntroduction(), p.getCategory(), tags(p), nzi(p.getPicWidth()), nzi(p.getPicHeight()), p.getPicColor(), author(user), instant(p.getPublishedAt())); }
     private M1Dtos.AuthorSummary author(User u) { return new M1Dtos.AuthorSummary(id(u.getId()), u.getUserName(), u.getUserAvatar()); }
     private List<String> tags(Picture p) { return p.getTags() == null || p.getTags().isBlank() ? List.of() : JSONUtil.toList(p.getTags(), String.class); }
