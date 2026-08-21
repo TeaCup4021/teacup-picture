@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.teacup.teacuppicturebackend.api.v1.model.M1Dtos;
+import com.teacup.teacuppicturebackend.auth.SessionContext;
 import com.teacup.teacuppicturebackend.mapper.PictureMapper;
 import com.teacup.teacuppicturebackend.mapper.PublishRequestMapper;
 import com.teacup.teacuppicturebackend.mapper.UserMapper;
@@ -32,8 +33,6 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
-
-import static com.teacup.teacuppicturebackend.constant.UserConstant.USER_LOGIN_STATE;
 
 @Service
 public class M1Service {
@@ -104,7 +103,7 @@ public class M1Service {
                 .eq(User::getIsDelete, 0)
                 .last("LIMIT 1"));
         if (user == null) throw V1Exception.unauthorized();
-        request.getSession(true).setAttribute(USER_LOGIN_STATE, user);
+        SessionContext.setLoginState(request.getSession(true), request, user);
         request.changeSessionId();
         return user;
     }

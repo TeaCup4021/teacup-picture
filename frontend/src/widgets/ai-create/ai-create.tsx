@@ -20,6 +20,7 @@ import {
   useAiModels,
   useAiQuotas,
   useCreateAiTask,
+  canUseAi,
   type AiBackground,
   type AiOutputFormat,
   type AiTaskType,
@@ -65,7 +66,7 @@ export function AiCreate() {
   const router = useRouter();
   const [mode, setMode] = useState<AiTaskType>("generate");
   const session = usePrototypeSession();
-  const enabled = session.data?.role === "user";
+  const enabled = canUseAi(session.data?.role);
   const models = useAiModels(enabled);
   const quotas = useAiQuotas(enabled);
   const pictures = usePersonalPictures(enabled);
@@ -124,7 +125,7 @@ export function AiCreate() {
     return (
       <Result
         status="403"
-        title="登录普通用户账号后使用 AI 创作"
+        title="登录账号后使用 AI 创作"
         extra={
           <Button type="primary" href="/login">
             去登录

@@ -1,4 +1,5 @@
 export { aiApi } from "@/features/ai/api/ai-api";
+export { canUseAi } from "@/features/ai/model/permissions";
 export {
   useAiModels,
   useAiQuotas,

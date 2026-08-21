@@ -11,7 +11,13 @@ import { Alert, App, Button, Result, Segmented, Skeleton, Table, Tag, Tooltip } 
 import type { TableColumnsType } from "antd";
 import { useState } from "react";
 import { apiClient } from "@/api/client";
-import { useAiTasks, useCancelAiTask, type AiTask, type AiTaskStatus } from "@/features/ai";
+import {
+  canUseAi,
+  useAiTasks,
+  useCancelAiTask,
+  type AiTask,
+  type AiTaskStatus,
+} from "@/features/ai";
 import { usePrototypeSession } from "@/features/prototype";
 import { PictureImage } from "@/features/prototype/ui/picture-image";
 
@@ -35,7 +41,7 @@ export function AiTasks() {
   const { message } = App.useApp();
   const [filter, setFilter] = useState<"all" | AiTaskStatus>("all");
   const session = usePrototypeSession();
-  const enabled = session.data?.role === "user";
+  const enabled = canUseAi(session.data?.role);
   const query = useAiTasks(filter === "all" ? undefined : filter, enabled);
   const cancel = useCancelAiTask();
 
@@ -49,7 +55,7 @@ export function AiTasks() {
     return (
       <Result
         status="403"
-        title="登录普通用户账号后查看 AI 任务"
+        title="登录账号后查看 AI 任务"
         extra={
           <Button type="primary" href="/login">
             去登录

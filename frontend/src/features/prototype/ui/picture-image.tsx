@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useState } from "react";
+import { useSessionContext, withSessionContext } from "@/api/session-context";
 
 interface PictureImageProps {
   alt: string;
@@ -15,7 +16,9 @@ interface PictureImageProps {
 
 export function PictureImage({ alt, className, fallbackSrc = "/mock-images/gallery-08.jpg", onError, priority, src }: PictureImageProps) {
   const [failedSource, setFailedSource] = useState<string | null>(null);
-  const resolvedSource = failedSource === src && fallbackSrc ? fallbackSrc : src;
+  const sessionContext = useSessionContext();
+  const resolvedSource =
+    failedSource === src && fallbackSrc ? fallbackSrc : withSessionContext(src, sessionContext);
 
   return (
     <Image
@@ -32,7 +35,7 @@ export function PictureImage({ alt, className, fallbackSrc = "/mock-images/galle
       }
       onError={() => {
         onError?.();
-        if (fallbackSrc) setFailedSource(src);
+        if (fallbackSrc && sessionContext) setFailedSource(src);
       }}
     />
   );

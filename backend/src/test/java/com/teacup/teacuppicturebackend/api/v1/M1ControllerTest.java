@@ -1,6 +1,7 @@
 package com.teacup.teacuppicturebackend.api.v1;
 
 import com.teacup.teacuppicturebackend.api.v1.model.M1Dtos;
+import com.teacup.teacuppicturebackend.auth.SessionContext;
 import com.teacup.teacuppicturebackend.model.entity.User;
 import com.teacup.teacuppicturebackend.storage.PictureAssetService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockFilterConfig;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Instant;
@@ -22,6 +24,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class M1ControllerTest {
     MockMvc mockMvc;
@@ -79,6 +83,22 @@ class M1ControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("TEACUP_SESSION=;")))
                 .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Max-Age=0")));
+    }
+
+    @Test
+    void logoutOnlyClearsTheCurrentBrowserTabContext() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute(SessionContext.loginAttribute("tab-admin"), new User());
+        session.setAttribute(SessionContext.loginAttribute("tab-user"), new User());
+
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .header(SessionContext.HEADER, "tab-admin")
+                        .session(session))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Set-Cookie"));
+
+        assertNull(session.getAttribute(SessionContext.loginAttribute("tab-admin")));
+        assertNotNull(session.getAttribute(SessionContext.loginAttribute("tab-user")));
     }
 
     @Test

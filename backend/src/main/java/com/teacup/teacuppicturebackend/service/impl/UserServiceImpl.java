@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.core.toolkit.ObjectUtils;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 
 import com.teacup.teacuppicturebackend.auth.StpKit;
+import com.teacup.teacuppicturebackend.auth.SessionContext;
 import com.teacup.teacuppicturebackend.constant.UserConstant;
 import com.teacup.teacuppicturebackend.exception.BusinessException;
 import com.teacup.teacuppicturebackend.exception.ErrorCode;
@@ -127,7 +128,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR,"用户不存在或密码错误");
         }
         //3.记录用户的登录态
-        request.getSession().setAttribute(USER_LOGIN_STATE,user);
+        SessionContext.setLoginState(request.getSession(), request, user);
 
         StpKit.SPACE.login(user.getId());
         StpKit.SPACE.getSession().set(USER_LOGIN_STATE, user);
@@ -142,7 +143,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     public User getLoginUser(HttpServletRequest request) {
 
         //先判断是否已经登录
-        Object userLoginState = request.getSession().getAttribute(USER_LOGIN_STATE);
+        Object userLoginState = SessionContext.getLoginState(request.getSession(false), request);
         User user=(User) userLoginState;
         if(user==null||user.getId()==null){
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR,"用户未登录");
@@ -175,7 +176,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             throw new BusinessException(ErrorCode.OPERATION_ERROR,"当前未登录");
         }
         //移除登录状态
-        request.getSession().removeAttribute(USER_LOGIN_STATE);
+        SessionContext.removeLoginState(request.getSession(false), request);
         return true;
     }
 

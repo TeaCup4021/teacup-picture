@@ -8,6 +8,7 @@ import { useState } from "react";
 import { m1Api, usePrototypeSession, usePrototypeUpload } from "@/features/prototype";
 import { PictureImage } from "@/features/prototype/ui/picture-image";
 
+// 表单数据结构：标题、描述、分类、标签、URL
 interface UploadFormValues {
   title: string;
   description?: string;
@@ -16,12 +17,14 @@ interface UploadFormValues {
   url?: string;
 }
 
+// 预览状态结构：图片地址(src)、宽、高
 interface PreviewState {
   src: string;
   width: number;
   height: number;
 }
 
+// 读取本地选中的图片文件并获取其原始尺寸
 function readPicture(file: File): Promise<PreviewState> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -153,11 +156,11 @@ export function UploadScreen({ spaceId }: { spaceId?: string }) {
     );
   }
 
-  if (!session.data || session.data.role !== "user") {
+  if (!session.data) {
     return (
       <Result
         status="403"
-        title="登录普通用户账号后上传图片"
+        title="登录后上传图片"
         extra={
           <Button type="primary" href="/login">
             去登录

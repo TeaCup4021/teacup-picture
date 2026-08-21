@@ -41,7 +41,7 @@ export function usePublicPictures() {
 export function usePersonalPictures(enabled = true) {
   return useQuery({
     queryKey: keys.personalPictures,
-    queryFn: m1Api.getPersonalPictures,
+    queryFn: () => m1Api.getPersonalPictures(),
     enabled,
   });
 }

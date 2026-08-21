@@ -4,7 +4,10 @@ info:
   version: 1.0.0
   description: >-
     M1 target contract for authentication, the default personal space,
-    picture upload and reads, publish review, and the public gallery.
+    picture upload and reads, publish review, and the public gallery. A browser
+    tab may send the optional X-Teacup-Session-Context header (or the same
+    value as the sessionContext query parameter for native image requests) to
+    select its login state within the server-owned HttpSession.
 servers:
   - url: http://localhost:8123/api/v1
     description: Local backend
@@ -46,7 +49,7 @@ paths:
     post:
       tags: [Auth]
       operationId: login
-      summary: Create a Cookie session
+       summary: Create a Cookie session for the current browser tab
       requestBody:
         required: true
         content:
@@ -60,7 +63,7 @@ paths:
             X-Request-Id:
               $ref: '#/components/headers/RequestId'
             Set-Cookie:
-              description: HttpOnly TEACUP_SESSION Cookie
+               description: HttpOnly TEACUP_SESSION Cookie
               schema:
                 type: string
           content:
@@ -77,8 +80,8 @@ paths:
     post:
       tags: [Auth]
       operationId: logout
-      summary: Clear the current session
-      description: Idempotent even when the session has already expired.
+       summary: Clear the current browser-tab session
+       description: Idempotent even when the session has already expired. Other tab contexts in the same HttpSession remain logged in.
       security:
         - cookieAuth: []
       responses:
@@ -558,6 +561,16 @@ components:
       schema:
         type: string
   parameters:
+    SessionContext:
+      name: X-Teacup-Session-Context
+      in: header
+      required: false
+      description: Opaque per-tab login-state selector; it is not an authentication token.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+        pattern: '^[A-Za-z0-9._:-]+$'
     Page:
       name: page
       in: query

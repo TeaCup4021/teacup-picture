@@ -110,6 +110,12 @@ components:
   securitySchemes:
     cookieAuth: { type: apiKey, in: cookie, name: TEACUP_SESSION }
   parameters:
+    SessionContext:
+      name: X-Teacup-Session-Context
+      in: header
+      required: false
+      description: Opaque per-tab login-state selector used with the HttpOnly Cookie session.
+      schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$' }
     TaskId: { in: path, name: taskId, required: true, schema: { $ref: '#/components/schemas/Id' } }
     ModelId: { in: path, name: modelId, required: true, schema: { $ref: '#/components/schemas/Id' } }
   schemas:

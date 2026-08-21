@@ -90,7 +90,11 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
 
   if (isWorkspace || isAdmin) {
     const navigation = isAdmin
-      ? [{ href: "/admin/reviews", label: "公开审核", icon: <AuditOutlined /> }]
+      ? [
+          { href: "/admin/reviews", label: "公开审核", icon: <AuditOutlined /> },
+          { href: "/ai/create", label: "AI 创作", icon: <BgColorsOutlined /> },
+          { href: "/ai/tasks", label: "任务中心", icon: <AuditOutlined /> },
+        ]
       : workspaceNavigation;
 
     return (
@@ -169,7 +173,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
             ))}
           </nav>
           <div className="header-account">
-            {session.data?.role === "user" ? (
+            {session.data ? (
               <Button type="primary" href="/upload" icon={<UploadOutlined />}>
                 上传图片
               </Button>

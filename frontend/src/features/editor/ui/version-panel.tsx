@@ -14,6 +14,7 @@ import {
   Typography,
 } from "antd";
 import type { PictureVersionSummary } from "@/features/editor/model/types";
+import { useSessionContext, withSessionContext } from "@/api/session-context";
 
 interface VersionPanelProps {
   open: boolean;
@@ -36,6 +37,7 @@ export function VersionPanel({
   onClose,
   onRestore,
 }: VersionPanelProps) {
+  const sessionContext = useSessionContext();
   return (
     <Drawer title="版本历史" size={420} open={open} onClose={onClose} destroyOnHidden>
       {loading ? (
@@ -77,11 +79,11 @@ export function VersionPanel({
                 avatar={
                   <Image
                     className="version-thumbnail"
-                    src={version.thumbnailUrl}
+                    src={withSessionContext(version.thumbnailUrl, sessionContext)}
                     alt={version.name}
                     width={64}
                     height={64}
-                    preview={{ src: version.thumbnailUrl }}
+                    preview={{ src: withSessionContext(version.thumbnailUrl, sessionContext) }}
                   />
                 }
                 title={

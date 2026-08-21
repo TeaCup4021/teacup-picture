@@ -32,10 +32,10 @@
 ## 会话
 
 - 注册成功返回 `userId` 和 `personalSpaceId`，但不自动登录。
-- 登录成功设置 `TEACUP_SESSION` Cookie，并返回当前用户。
+- 登录成功设置 `TEACUP_SESSION` Cookie，并返回当前用户。为支持同一浏览器多个标签页分别登录，前端为每个标签页生成一个不透明的 `X-Teacup-Session-Context` 值；服务端仍只在 HttpOnly Cookie 对应的 HttpSession 中保存登录态。
 - Cookie 为 `HttpOnly`、`Path=/`、`SameSite=Lax`；生产环境必须启用 `Secure`。
 - 浏览器请求使用 `withCredentials: true`，前端不保存会话令牌。
-- 退出登录幂等；无论会话是否存在都返回成功并清除 Cookie。
+- 退出登录幂等；带标签页上下文时只清除当前标签页的登录态，其他标签页仍保持登录。最后一个上下文退出时才清除 Cookie。
 
 ## 默认个人空间
 

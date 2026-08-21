@@ -1,4 +1,5 @@
 import axios, { AxiosError, type AxiosInstance } from "axios";
+import { getSessionContext, SESSION_CONTEXT_HEADER } from "@/api/session-context";
 
 export interface ApiEnvelope<T> {
   code: number;
@@ -54,6 +55,12 @@ function createApiClient(): AxiosInstance {
     },
     timeout: 15_000,
     withCredentials: true,
+  });
+
+  client.interceptors.request.use((config) => {
+    config.headers = config.headers ?? {};
+    config.headers[SESSION_CONTEXT_HEADER] = getSessionContext();
+    return config;
   });
 
   client.interceptors.response.use(

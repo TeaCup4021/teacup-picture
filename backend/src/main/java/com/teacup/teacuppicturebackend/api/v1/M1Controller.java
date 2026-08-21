@@ -1,6 +1,7 @@
 package com.teacup.teacuppicturebackend.api.v1;
 
 import com.teacup.teacuppicturebackend.api.v1.model.M1Dtos;
+import com.teacup.teacuppicturebackend.auth.SessionContext;
 import com.teacup.teacuppicturebackend.model.entity.User;
 import com.teacup.teacuppicturebackend.storage.PictureAssetService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
@@ -43,8 +44,17 @@ public class M1Controller {
     @PostMapping("/auth/logout")
     public ResponseEntity<V1Response<Boolean>> logout(HttpServletRequest request, HttpServletResponse response) {
         HttpSession session = request.getSession(false);
-        if (session != null) session.invalidate();
-        response.addHeader("Set-Cookie", "TEACUP_SESSION=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+        boolean expireCookie = session == null;
+        if (session != null) {
+            SessionContext.removeLoginState(session, request);
+            if (!SessionContext.hasAnyLoginState(session)) {
+                session.invalidate();
+                expireCookie = true;
+            }
+        }
+        if (expireCookie) {
+            response.addHeader("Set-Cookie", "TEACUP_SESSION=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+        }
         return response(HttpStatus.OK, true, request);
     }
 
