@@ -74,6 +74,8 @@ import type {
   PictureVersionDetail,
   PictureVersionSummary,
 } from "@/features/editor/model/types";
+import { useEditorCollaboration } from "@/features/editor/collaboration/use-editor-collaboration";
+import type { CollaborationStatus } from "@/features/editor/collaboration/types";
 
 interface EditorProps {
   pictureId: string;
@@ -208,6 +210,8 @@ function EditorWorkspace({
     createEditorHistory,
   );
   const document = history.present;
+  const collaboration = useEditorCollaboration(picture.id, initialDocument);
+  const collaborationDocument = collaboration.enabled ? collaboration.document : document;
   const [viewZoom, setViewZoom] = useState(1);
   const [tool, setTool] = useState<EditorTool>("select");
   const [strokeColor, setStrokeColor] = useState("#3370ff");
@@ -236,7 +240,7 @@ function EditorWorkspace({
     [adjustmentPreview, document],
   );
   const canvasDocument = useDeferredValue(effectiveDocument);
-  const documentRef = useRef(document);
+  const documentRef = useRef(collaborationDocument);
   const revisionRef = useRef<string | null>(initialDraft?.revision ?? null);
   const lastSavedRef = useRef<EditorDocument | null>(
     initialDraft ? cloneDocument(initialDraft.editorState) : null,
@@ -367,7 +371,13 @@ function EditorWorkspace({
   });
 
   function handleDocumentChange(next: EditorDocument) {
-    if (JSON.stringify(next) === JSON.stringify(document)) return;
+    if (JSON.stringify(next) === JSON.stringify(collaborationDocument)) return;
+    if (collaboration.enabled) {
+      collaboration.applyDocument(next);
+      setSessionTouched(true);
+      setSaveState("dirty");
+      return;
+    }
     commit(next);
   }
 
@@ -382,20 +392,40 @@ function EditorWorkspace({
   function handleAdjustmentCommit(key: AdjustmentKey, value: number) {
     setAdjustmentPreview(null);
     if (document.adjustments[key] === value) return;
-    commit(setAdjustment(document, key, value));
+    const next = setAdjustment(collaborationDocument, key, value);
+    if (collaboration.enabled) {
+      collaboration.applyDocument(next, "adjustment.set");
+      setSessionTouched(true);
+      setSaveState("dirty");
+    } else commit(next);
   }
 
   function handleLayerChange(id: string, patch: Partial<EditorLayer>) {
-    commit(updateLayer(document, id, patch));
+    const next = updateLayer(collaborationDocument, id, patch);
+    if (collaboration.enabled) {
+      collaboration.applyDocument(next, "layer.patch");
+      setSessionTouched(true);
+      setSaveState("dirty");
+    } else commit(next);
   }
 
   function handleLayerDelete(id: string) {
-    commit(removeLayer(document, id));
+    const next = removeLayer(collaborationDocument, id);
+    if (collaboration.enabled) {
+      collaboration.applyDocument(next, "layer.delete");
+      setSessionTouched(true);
+      setSaveState("dirty");
+    } else commit(next);
     setSelectedLayerId(null);
   }
 
   function handleCropApply(crop: CropRect) {
-    commit(setCrop(document, crop));
+    const next = setCrop(collaborationDocument, crop);
+    if (collaboration.enabled) {
+      collaboration.applyDocument(next, "crop.commit");
+      setSessionTouched(true);
+      setSaveState("dirty");
+    } else commit(next);
     setTool("select");
     message.success("裁切已应用");
   }
@@ -588,7 +618,7 @@ function EditorWorkspace({
       <div className="editor-body">
         <EditorToolRail tool={tool} onToolChange={setTool} />
         <EditorCanvas
-          document={canvasDocument}
+          document={collaboration.enabled ? collaborationDocument : canvasDocument}
           image={imageError ? null : image}
           tool={tool}
           strokeColor={strokeColor}

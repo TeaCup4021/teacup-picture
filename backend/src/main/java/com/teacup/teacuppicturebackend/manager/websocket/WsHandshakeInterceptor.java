@@ -24,6 +24,8 @@ import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * WebSocket 拦截器，建立连接前要先校验
@@ -31,6 +33,7 @@ import java.util.Map;
 @Slf4j
 @Component
 public class WsHandshakeInterceptor implements HandshakeInterceptor {
+    private static final Pattern COLLABORATION_PATH = Pattern.compile("/api/v1/ws/pictures/(\\d+)/collaboration");
 
     @Resource
     private UserService userService;
@@ -60,6 +63,9 @@ public class WsHandshakeInterceptor implements HandshakeInterceptor {
             HttpServletRequest httpServletRequest = ((ServletServerHttpRequest) request).getServletRequest();
             // 从请求中获取参数
             String pictureId = httpServletRequest.getParameter("pictureId");
+            Matcher collaborationMatcher = COLLABORATION_PATH.matcher(httpServletRequest.getRequestURI());
+            boolean collaboration = collaborationMatcher.matches();
+            if (collaboration) pictureId = collaborationMatcher.group(1);
             if (StrUtil.isBlank(pictureId)) {
                 log.error("缺少图片参数，拒绝握手");
                 return false;
@@ -90,7 +96,7 @@ public class WsHandshakeInterceptor implements HandshakeInterceptor {
                 }
             }
             List<String> permissionList = spaceUserAuthManager.getPermissionList(space, loginUser);
-            if (!permissionList.contains(SpaceUserPermissionConstant.PICTURE_EDIT)) {
+            if (!collaboration && !permissionList.contains(SpaceUserPermissionConstant.PICTURE_EDIT)) {
                 log.error("用户没有编辑图片的权限，拒绝握手");
                 return false;
             }
@@ -98,6 +104,8 @@ public class WsHandshakeInterceptor implements HandshakeInterceptor {
             attributes.put("user", loginUser);
             attributes.put("userId", loginUser.getId());
             attributes.put("pictureId", Long.valueOf(pictureId)); // 记得转换为 Long 类型
+            attributes.put("collaboration", collaboration);
+            attributes.put("canEdit", permissionList.contains(SpaceUserPermissionConstant.PICTURE_EDIT));
         }
         return true;
     }

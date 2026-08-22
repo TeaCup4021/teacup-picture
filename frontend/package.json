@@ -36,6 +36,8 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-hook-form": "^7.85.0",
+    "y-indexeddb": "^9.0.12",
+    "yjs": "^13.6.27",
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
   },

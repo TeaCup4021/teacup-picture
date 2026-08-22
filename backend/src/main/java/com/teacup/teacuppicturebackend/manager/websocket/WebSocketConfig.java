@@ -18,6 +18,9 @@ public class WebSocketConfig implements WebSocketConfigurer {
     private PictureEditHandler pictureEditHandler;
 
     @Resource
+    private CollaborationWebSocketHandler collaborationWebSocketHandler;
+
+    @Resource
     private WsHandshakeInterceptor wsHandshakeInterceptor;
 
     @Override
@@ -27,7 +30,10 @@ public class WebSocketConfig implements WebSocketConfigurer {
                 //"/ws/picture/edit"：这是 WebSocket 的访问端点（URL）。客户端需要通过这个地址（例如 ws://localhost:8080/ws/picture/edit）来发起连接。
                 .addInterceptors(wsHandshakeInterceptor)
                 //添加一个握手拦截器
-                .setAllowedOrigins("*");
+                .setAllowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*");
+        registry.addHandler(collaborationWebSocketHandler, "/api/v1/ws/pictures/{pictureId}/collaboration")
+                .addInterceptors(wsHandshakeInterceptor)
+                .setAllowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*");
                 //设置允许跨域访问的源。 ◦ "*"：表示允许来自任何域名的请求连接该 WebSocket。 ◦ 原理：WebSocket 协议在握手阶段会发送一个 Origin 头，服务器通过配置此参数来决定是否接受该跨域连接。
     }
 }

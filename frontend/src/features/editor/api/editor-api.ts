@@ -9,6 +9,7 @@ import type {
   VersionListResponse,
 } from "@/features/editor/model/types";
 import { normalizeEditorDocument } from "@/features/editor/model/document";
+import type { CollaborationSession } from "@/features/editor/collaboration/types";
 
 interface ApiEditorStateView {
   editorState: EditorDocument | null;
@@ -29,6 +30,17 @@ async function put<T>(url: string, body?: unknown): Promise<T> {
 }
 
 export const editorApi = {
+  async getCollaborationSession(pictureId: string): Promise<CollaborationSession> {
+    return get<CollaborationSession>(`/pictures/${pictureId}/collaboration/session`);
+  },
+
+  async checkpointCollaboration(
+    pictureId: string,
+    input: { roomEpoch: string; lastServerSeq: string; yjsState: string; editorState: EditorDocument; expectedRevision: string | null },
+  ): Promise<{ roomEpoch: string; lastServerSeq: string; revision: string }> {
+    return post(`/pictures/${pictureId}/collaboration/checkpoint`, input);
+  },
+
   async getDraft(pictureId: string): Promise<EditorDraft | null> {
     const value = await get<ApiEditorStateView>(`/pictures/${pictureId}/editor-state`);
     return value.editorState && value.revision !== null
