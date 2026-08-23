@@ -14,6 +14,7 @@ public class CollaborationRoom {
     private Long id;
     private Long pictureId;
     private Long baseVersionId;
+    private String baseEditorState;
     private String roomEpoch;
     private Long lastSeq;
     private String status;

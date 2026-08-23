@@ -9,6 +9,7 @@ export interface CollaborationSession {
   enabled: boolean;
   canEdit: boolean;
   wsPath: string | null;
+  baselineEditorState?: EditorDocument | null;
 }
 
 export type CollaborationStatus = "disabled" | "connecting" | "connected" | "reconnecting" | "error";

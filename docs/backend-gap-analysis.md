@@ -16,7 +16,7 @@
 | 完成 | M2 AI 任务与配额 | 统一任务、模型能力、独立额度、幂等、取消、超时、结果入库和鉴权下载已实现；公网部署安全闸门仍未完成 |
 | 完成 | M3-R 版本与单人编辑器 | EditorState v3（兼容 v2）、裁切、完整调节、统一预览/导出、草稿、不可变版本和前端生产验收已闭环 |
 | P1 | 邀请、评论、分享 | 数据表、实体、服务和接口均缺失 |
-| P1 | 协作持久化模型 | 只有进程内 WebSocket 广播和单编辑者锁，不具备恢复、排序或审计能力 |
+| 完成（单实例） | 协作持久化模型 | M5 已有持久化基线、serverSeq、operationId 幂等、分页补偿、序号缺口检测、snapshot、hash checkpoint、显式对象锁和恢复 epoch 切换；跨实例广播/分布式锁/日志压缩仍是生产扩展 |
 | P2 | 安全加固 | 除凭据清理外按本文安全闸门暂缓，但必须在公网部署前完成 |
 
 ### M1 实施进度（2026-08-12）
@@ -169,7 +169,7 @@ M2 已通过 `V3__add_m2_ai_workflow.sql`、`V6__harden_m2_ai_workflow.sql`、`V
 | `collaboration_operation` | picture、version、operation_id、actor、server_seq、base_version、object_id、payload | 操作 ID 幂等、服务端排序、断线补偿和审计 |
 | `collaboration_snapshot` | picture、version、last_seq、editor_state、created_at | 加速加入房间和历史恢复；与操作日志边界明确 |
 
-现有 WebSocket 只在单进程内保存会话和“每张图一个编辑者”的锁，并广播有限编辑动作。它缺少服务端序号、操作幂等、快照、增量恢复、对象级冲突、跨实例广播和持久化，因此不能视为产品级多人协作实现。CRDT、OT 或服务端有序操作模型仍是待决策项；选型前先固定操作信封、快照和版本边界。
+M5 新增 `/api/v1/ws/pictures/{pictureId}/collaboration`、`V15__m5_collaboration.sql` 和 `V16__m5_collaboration_reliability.sql`。Yjs update 以 base64 写入 `collaboration_update`，服务端在数据库事务中分配房间 `serverSeq`，再 ACK/广播；加入房间时按持久化基线、最新 snapshot 和分页增量日志恢复，并拒绝序号缺口。前端使用 Yjs/Y.Text/字段级 Y.Map/Y.Array，并用 IndexedDB 保存本地文档和未确认更新。对象锁已具备显式申请、续期、释放和 token 校验；正式替换/恢复在事务内轮换 epoch。当前广播和锁仍是单个 Spring 进程内实现，不能在多实例部署中保证全局互斥；Redis Pub/Sub/分布式锁、更新压缩、连接限流和真实多人 E2E 仍是生产验收项。
 
 ## 8. 暂缓的安全问题
 
@@ -208,6 +208,6 @@ M2 已通过 `V3__add_m2_ai_workflow.sql`、`V6__harden_m2_ai_workflow.sql`、`V
 4. ~~交付认证、个人空间、图片上传/管理、公开只读和发布审核的 M1 闭环。~~ 已完成真实 E2E 验收。
 5. ~~实现 AI 任务与独立配额。~~ M2 已完成。
 6. ~~实现单人编辑器与版本持久化闭环。~~ M3-R 已完成全量生产验收；下一阶段进入 M4 团队与邀请。
-7. 在版本和操作持久化模型稳定后，再重构实时协作协议。
+7. ~~在版本和操作持久化模型稳定后，再重构实时协作协议。~~ M5-R 已完成基础协议和持久化；后续补齐跨实例广播、分布式锁、日志压缩和版本恢复原子切换。
 
 每个阶段都必须有数据库迁移、服务层测试、控制器契约测试和鉴权测试；不能只以接口能返回成功作为完成标准。

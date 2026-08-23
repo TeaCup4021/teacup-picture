@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
@@ -34,6 +35,7 @@ public class CollaborationWebSocketHandler extends TextWebSocketHandler {
     private ObjectMapper objectMapper;
 
     private final Map<String, Set<WebSocketSession>> roomSessions = new ConcurrentHashMap<>();
+    private final Map<String, LockLease> locks = new ConcurrentHashMap<>();
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
@@ -54,6 +56,9 @@ public class CollaborationWebSocketHandler extends TextWebSocketHandler {
         User user = (User) session.getAttributes().get("user");
         long pictureId = (Long) session.getAttributes().get("pictureId");
         if ("update".equals(type)) { handleUpdate(session, user, pictureId, roomId, node); return; }
+        if ("lock.acquire".equals(type)) { handleLockAcquire(session, roomId, node); return; }
+        if ("lock.renew".equals(type)) { handleLockRenew(session, roomId, node); return; }
+        if ("lock.release".equals(type)) { handleLockRelease(session, roomId, node); return; }
         if ("awareness".equals(type)) { handleAwareness(session, roomId, node); return; }
         if ("ping".equals(type)) { send(session, objectMapper.createObjectNode().put("type", "pong")); return; }
         sendError(session, "不支持的协作消息");
@@ -72,7 +77,7 @@ public class CollaborationWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         long afterSeq = parseLong(text(node, "lastServerSeq"), 0);
-        var records = collaboration.updatesAfter(user, pictureId, requestedEpoch, afterSeq);
+        var bootstrap = collaboration.bootstrap(user, pictureId, requestedEpoch, afterSeq);
         session.getAttributes().put("collaborationRoomId", room.roomId());
         roomSessions.computeIfAbsent(room.roomId(), ignored -> ConcurrentHashMap.newKeySet()).add(session);
 
@@ -82,10 +87,26 @@ public class CollaborationWebSocketHandler extends TextWebSocketHandler {
         welcome.put("roomEpoch", room.roomEpoch());
         welcome.put("serverSeq", room.lastServerSeq());
         welcome.put("canEdit", room.canEdit());
+        if (room.baselineEditorState() != null) welcome.set("baselineEditorState", objectMapper.valueToTree(room.baselineEditorState()));
+        if (bootstrap.snapshotYjsState() != null) welcome.put("snapshotYjsState", bootstrap.snapshotYjsState());
+        welcome.put("snapshotServerSeq", bootstrap.snapshotServerSeq());
         ArrayNode updates = welcome.putArray("updates");
-        records.forEach(record -> updates.add(recordNode(record, "update")));
+        bootstrap.updates().forEach(record -> updates.add(recordNode(record, "update")));
+        ArrayNode presence = welcome.putArray("presence");
+        for (WebSocketSession other : roomSessions.getOrDefault(room.roomId(), Collections.emptySet())) {
+            presence.add(String.valueOf(other.getAttributes().get("userId")));
+        }
         send(session, welcome);
-        broadcast(room.roomId(), objectMapper.createObjectNode().put("type", "presence").put("event", "joined"), session);
+        while (bootstrap.hasMore()) {
+            bootstrap = collaboration.bootstrap(user, pictureId, requestedEpoch, Long.parseLong(bootstrap.nextServerSeq()));
+            ObjectNode page = objectMapper.createObjectNode().put("type", "updates");
+            ArrayNode pageUpdates = page.putArray("updates");
+            bootstrap.updates().forEach(record -> pageUpdates.add(recordNode(record, "update")));
+            page.put("serverSeq", bootstrap.nextServerSeq());
+            send(session, page);
+        }
+        broadcast(room.roomId(), objectMapper.createObjectNode().put("type", "presence").put("event", "joined")
+                .put("actorId", String.valueOf(session.getAttributes().get("userId"))), session);
     }
 
     private void handleUpdate(WebSocketSession session, User user, long pictureId, String roomId,
@@ -93,6 +114,12 @@ public class CollaborationWebSocketHandler extends TextWebSocketHandler {
         CollaborationDtos.UpdateRequest request;
         try { request = objectMapper.treeToValue(node, CollaborationDtos.UpdateRequest.class); }
         catch (Exception exception) { sendError(session, "协作更新格式无效"); return; }
+        if (request.targetId() != null && !request.targetId().isBlank()
+                && !hasLock(session, roomId, request.targetId(), request.lockToken())) {
+            send(session, objectMapper.createObjectNode().put("type", "lock.denied")
+                    .put("operationId", request.operationId()).put("targetId", request.targetId()));
+            return;
+        }
         CollaborationDtos.UpdateResult result;
         try { result = collaboration.append(user, pictureId, request); }
         catch (V1Exception exception) { sendError(session, exception.getMessage()); return; }
@@ -101,6 +128,7 @@ public class CollaborationWebSocketHandler extends TextWebSocketHandler {
         ack.put("operationId", result.record().operationId());
         ack.put("serverSeq", result.record().serverSeq());
         ack.put("duplicate", result.duplicate());
+        if (result.record().lockToken() != null) ack.put("lockToken", result.record().lockToken());
         send(session, ack);
         if (!result.duplicate()) broadcast(roomId, recordNode(result.record(), "update"), session);
     }
@@ -118,6 +146,55 @@ public class CollaborationWebSocketHandler extends TextWebSocketHandler {
         broadcast(roomId, message, session);
     }
 
+    private void handleLockAcquire(WebSocketSession session, String roomId, JsonNode node) throws IOException {
+        String targetId = text(node, "targetId");
+        String requestId = text(node, "requestId");
+        if (targetId == null || targetId.isBlank() || targetId.length() > 128) {
+            sendError(session, "锁目标无效");
+            return;
+        }
+        String key = roomId + ":" + targetId;
+        long now = System.currentTimeMillis();
+        String token;
+        synchronized (locks) {
+            LockLease current = locks.get(key);
+            if (current != null && current.expiresAt() > now && !current.sessionId().equals(session.getId())) {
+                send(session, objectMapper.createObjectNode().put("type", "lock.denied")
+                        .put("requestId", requestId).put("targetId", targetId));
+                return;
+            }
+            token = current != null && current.sessionId().equals(session.getId())
+                    ? current.token() : UUID.randomUUID().toString();
+            locks.put(key, new LockLease(session.getId(), token, now + 10_000));
+        }
+        send(session, objectMapper.createObjectNode().put("type", "lock.granted")
+                .put("requestId", requestId).put("targetId", targetId).put("lockToken", token)
+                .put("expiresAt", now + 10_000));
+    }
+
+    private void handleLockRenew(WebSocketSession session, String roomId, JsonNode node) throws IOException {
+        String targetId = text(node, "targetId");
+        String token = text(node, "lockToken");
+        String key = roomId + ":" + targetId;
+        LockLease current = locks.get(key);
+        long expiresAt = System.currentTimeMillis() + 10_000;
+        if (current == null || !current.sessionId().equals(session.getId()) || !current.token().equals(token)) {
+            send(session, objectMapper.createObjectNode().put("type", "lock.denied").put("targetId", targetId));
+            return;
+        }
+        locks.put(key, new LockLease(session.getId(), token, expiresAt));
+        send(session, objectMapper.createObjectNode().put("type", "lock.renewed")
+                .put("targetId", targetId).put("lockToken", token).put("expiresAt", expiresAt));
+    }
+
+    private void handleLockRelease(WebSocketSession session, String roomId, JsonNode node) throws IOException {
+        String targetId = text(node, "targetId");
+        String token = text(node, "lockToken");
+        String key = roomId + ":" + targetId;
+        locks.computeIfPresent(key, (ignored, current) -> current.sessionId().equals(session.getId()) && current.token().equals(token) ? null : current);
+        send(session, objectMapper.createObjectNode().put("type", "lock.released").put("targetId", targetId));
+    }
+
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
         String roomId = (String) session.getAttributes().get("collaborationRoomId");
@@ -129,7 +206,18 @@ public class CollaborationWebSocketHandler extends TextWebSocketHandler {
                     .put("actorId", String.valueOf(session.getAttributes().get("userId"))), session);
             if (sessions.isEmpty()) roomSessions.remove(roomId, sessions);
         }
+        locks.entrySet().removeIf(entry -> entry.getValue().sessionId().equals(session.getId()));
     }
+
+    private boolean hasLock(WebSocketSession session, String roomId, String targetId, String token) {
+        String key = roomId + ":" + targetId;
+        LockLease current = locks.get(key);
+        long now = System.currentTimeMillis();
+        return current != null && current.expiresAt() > now && current.sessionId().equals(session.getId())
+                && current.token().equals(token);
+    }
+
+    private record LockLease(String sessionId, String token, long expiresAt) {}
 
     private void broadcast(String roomId, ObjectNode message, WebSocketSession excluded) throws IOException {
         Set<WebSocketSession> sessions = roomSessions.getOrDefault(roomId, Collections.emptySet());
@@ -158,6 +246,7 @@ public class CollaborationWebSocketHandler extends TextWebSocketHandler {
         node.put("gestureId", record.gestureId());
         node.put("kind", record.kind());
         node.put("targetId", record.targetId());
+        node.put("lockToken", record.lockToken());
         node.set("changedFields", mapper.valueToTree(record.changedFields()));
         node.put("phase", record.phase());
         node.put("yjsUpdate", record.yjsUpdate());

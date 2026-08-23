@@ -24,9 +24,11 @@ interface EditorCanvasProps {
   textColor: string;
   fontSize: number;
   viewZoom: number;
+  readOnly: boolean;
   selectedLayerId: string | null;
   onSelectLayer: (id: string | null) => void;
   onDocumentChange: (document: EditorDocument) => void;
+  onStrokeChunk: (document: EditorDocument, layerId: string) => void;
   onCropApply: (crop: CropRect) => void;
   onCropCancel: () => void;
 }
@@ -53,9 +55,11 @@ export function EditorCanvas({
   textColor,
   fontSize,
   viewZoom,
+  readOnly,
   selectedLayerId,
   onSelectLayer,
   onDocumentChange,
+  onStrokeChunk,
   onCropApply,
   onCropCancel,
 }: EditorCanvasProps) {
@@ -76,6 +80,14 @@ export function EditorCanvas({
   const fontSizeRef = useRef(fontSize);
   const selectedLayerIdRef = useRef(selectedLayerId);
   const viewZoomRef = useRef(viewZoom);
+  const readOnlyRef = useRef(readOnly);
+  const strokePointsRef = useRef<Array<{ x: number; y: number }>>([]);
+  const strokeLayerIdRef = useRef<string | null>(null);
+  const strokeLastEmitRef = useRef(0);
+  const onStrokeChunkRef = useRef(onStrokeChunk);
+  const strokeColorRef = useRef(strokeColor);
+  const strokeSizeRef = useRef(strokeSize);
+  const interactionActiveRef = useRef(false);
   const [draftCrop, setDraftCrop] = useState<CropRect | null>(null);
   const [eraserCursor, setEraserCursor] = useState<{ x: number; y: number } | null>(null);
 
@@ -88,6 +100,10 @@ export function EditorCanvas({
     fontSizeRef.current = fontSize;
     selectedLayerIdRef.current = selectedLayerId;
     viewZoomRef.current = viewZoom;
+    readOnlyRef.current = readOnly;
+    onStrokeChunkRef.current = onStrokeChunk;
+    strokeColorRef.current = strokeColor;
+    strokeSizeRef.current = strokeSize;
   }, [
     document,
     fontSize,
@@ -97,6 +113,10 @@ export function EditorCanvas({
     textColor,
     tool,
     viewZoom,
+    readOnly,
+    onStrokeChunk,
+    strokeColor,
+    strokeSize,
   ]);
 
   useEffect(() => {
@@ -121,6 +141,14 @@ export function EditorCanvas({
         serializeCanvas(canvas, documentRef.current, cropDraftRef.current),
       );
     };
+    let lastLiveEmit = 0;
+    const emitLiveDocument = () => {
+      if (applyingRef.current) return;
+      const now = Date.now();
+      if (now - lastLiveEmit < 50) return;
+      lastLiveEmit = now;
+      emitDocument();
+    };
 
     canvas.on("selection:created", ({ selected }) => {
       const object = selected?.[0] as (FabricCanvasObject & { layerId?: string }) | undefined;
@@ -143,19 +171,28 @@ export function EditorCanvas({
       if (object.kind === "crop") {
         cropDraftRef.current = rectToCrop(object, documentRef.current);
         setDraftCrop(cropDraftRef.current);
+        interactionActiveRef.current = false;
         canvas.requestRenderAll();
         return;
       }
+      interactionActiveRef.current = false;
       emitDocument();
     });
-    canvas.on("text:editing:exited", emitDocument);
+    canvas.on("object:moving", () => { interactionActiveRef.current = true; emitLiveDocument(); });
+    canvas.on("object:scaling", () => { interactionActiveRef.current = true; emitLiveDocument(); });
+    canvas.on("object:rotating", () => { interactionActiveRef.current = true; emitLiveDocument(); });
+    canvas.on("text:editing:exited", () => {
+      interactionActiveRef.current = false;
+      emitDocument();
+    });
+    canvas.on("text:changed", emitLiveDocument);
     canvas.on("path:created", (event) => {
       const path = event.path as FabricCanvasObject & {
         set: (key: string, value: unknown) => void;
       };
       path.set("kind", "layer");
       path.set("layerType", "drawing");
-      path.set("layerId", createObjectId());
+      path.set("layerId", strokeLayerIdRef.current ?? createObjectId());
       path.set(
         "drawingTool",
         toolRef.current === "eraser" ? "eraser" : toolRef.current === "marker" ? "marker" : "pen",
@@ -166,9 +203,40 @@ export function EditorCanvas({
           "destination-out";
       }
       emitDocument();
+      strokePointsRef.current = [];
+      strokeLayerIdRef.current = null;
+      interactionActiveRef.current = false;
     });
     canvas.on("mouse:down", (event) => {
-      if (toolRef.current !== "text") return;
+      if (readOnlyRef.current || !canvas.isDrawingMode) return;
+      const point = canvas.getScenePoint(event.e);
+      strokePointsRef.current = [point];
+      strokeLayerIdRef.current = createObjectId();
+      strokeLastEmitRef.current = 0;
+      interactionActiveRef.current = true;
+    });
+    canvas.on("mouse:move", (event) => {
+      if (readOnlyRef.current || !canvas.isDrawingMode || !strokeLayerIdRef.current) return;
+      const point = canvas.getScenePoint(event.e);
+      strokePointsRef.current.push(point);
+      const now = Date.now();
+      if (now - strokeLastEmitRef.current < 33) return;
+      strokeLastEmitRef.current = now;
+      const current = documentRef.current;
+      const layer: EditorLayer = {
+        id: strokeLayerIdRef.current,
+        type: "drawing",
+        tool: toolRef.current === "marker" ? "marker" : toolRef.current === "eraser" ? "eraser" : "pen",
+        color: strokeColorRef.current,
+        size: strokeSizeRef.current,
+        opacity: toolRef.current === "marker" ? 0.35 : 1,
+        path: strokePointsRef.current.map((value, index) => index === 0 ? ["M", value.x, value.y] : ["L", value.x, value.y]),
+        left: 0, top: 0, scaleX: 1, scaleY: 1, flipX: false, flipY: false, angle: 0,
+      };
+      onStrokeChunkRef.current({ ...current, layers: [...current.layers.filter((item) => item.id !== layer.id), layer] }, layer.id);
+    });
+    canvas.on("mouse:down", (event) => {
+      if (readOnlyRef.current || toolRef.current !== "text") return;
       const target = event.target as FabricCanvasObject | undefined;
       if (target?.kind === "layer") return;
       const point = canvas.getScenePoint(event.e);
@@ -209,6 +277,7 @@ export function EditorCanvas({
       canvas.add(text);
       canvas.setActiveObject(text);
       text.enterEditing();
+      interactionActiveRef.current = true;
       text.selectAll();
       canvas.requestRenderAll();
     });
@@ -226,6 +295,7 @@ export function EditorCanvas({
     if (!canvas) return;
     const previous = renderStateRef.current;
     const active = canvas.getActiveObject();
+    if (interactionActiveRef.current) return;
     if (active instanceof Textbox && active.isEditing && previous && previous.tool !== tool) {
       active.exitEditing();
       return;
@@ -268,8 +338,8 @@ export function EditorCanvas({
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    canvas.isDrawingMode = tool === "pen" || tool === "marker" || tool === "eraser";
-    canvas.selection = tool === "select";
+    canvas.isDrawingMode = !readOnly && (tool === "pen" || tool === "marker" || tool === "eraser");
+    canvas.selection = !readOnly && tool === "select";
     if (canvas.isDrawingMode) {
       const brush = new PencilBrush(canvas);
       brush.width = strokeSize;
@@ -280,11 +350,11 @@ export function EditorCanvas({
     canvas.getObjects().forEach((object) => {
       const metadata = object as unknown as FabricCanvasObject;
       if (metadata.kind === "crop") return;
-      object.selectable = tool === "select";
-      object.evented = tool === "select";
+      object.selectable = !readOnly && tool === "select";
+      object.evented = !readOnly && tool === "select";
     });
     canvas.requestRenderAll();
-  }, [tool, strokeColor, strokeSize]);
+  }, [readOnly, tool, strokeColor, strokeSize]);
 
   useEffect(() => {
     const canvas = fabricRef.current;

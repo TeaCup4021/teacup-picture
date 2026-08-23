@@ -209,9 +209,9 @@ function EditorWorkspace({
     initialDocument,
     createEditorHistory,
   );
-  const document = history.present;
   const collaboration = useEditorCollaboration(picture.id, initialDocument);
-  const collaborationDocument = collaboration.enabled ? collaboration.document : document;
+  const document = collaboration.enabled ? collaboration.document : history.present;
+  const collaborationDocument = document;
   const [viewZoom, setViewZoom] = useState(1);
   const [tool, setTool] = useState<EditorTool>("select");
   const [strokeColor, setStrokeColor] = useState("#3370ff");
@@ -255,6 +255,10 @@ function EditorWorkspace({
   }, [effectiveDocument]);
 
   useEffect(() => {
+    collaboration.setAwareness({ tool, selectedLayerId });
+  }, [collaboration, selectedLayerId, tool]);
+
+  useEffect(() => {
     saveDraftRef.current = saveDraft.mutateAsync;
   }, [saveDraft.mutateAsync]);
 
@@ -293,14 +297,14 @@ function EditorWorkspace({
   );
 
   useEffect(() => {
-    if (!sessionTouched || autosaveSuspendedRef.current) return;
+    if (collaboration.enabled || !sessionTouched || autosaveSuspendedRef.current) return;
     if (lastSavedRef.current && documentsEqual(lastSavedRef.current, document)) return;
     setSaveState("dirty");
     const timer = window.setTimeout(() => {
       if (!autosaveSuspendedRef.current) void persistSnapshot(document).catch(() => undefined);
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [document, persistSnapshot, sessionTouched]);
+  }, [collaboration.enabled, document, persistSnapshot, sessionTouched]);
 
   const hasSessionChanges =
     (sessionTouched || adjustmentPreview !== null) && !documentsEqual(effectiveDocument, baseline);
@@ -356,6 +360,26 @@ function EditorWorkspace({
     setSaveState("dirty");
   }
 
+  function undoShared() {
+    if (collaboration.enabled) {
+      collaboration.undo();
+      setSessionTouched(true);
+      setSaveState("dirty");
+      return;
+    }
+    undo();
+  }
+
+  function redoShared() {
+    if (collaboration.enabled) {
+      collaboration.redo();
+      setSessionTouched(true);
+      setSaveState("dirty");
+      return;
+    }
+    redo();
+  }
+
   useEffect(() => {
     const handleHistoryShortcut = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== "z")
@@ -370,15 +394,25 @@ function EditorWorkspace({
     return () => window.removeEventListener("keydown", handleHistoryShortcut);
   });
 
-  function handleDocumentChange(next: EditorDocument) {
-    if (JSON.stringify(next) === JSON.stringify(collaborationDocument)) return;
+  function commitShared(next: EditorDocument, kind = "document.patch", targetId: string | null = null, changedFields = ["editorState"]) {
+    if (collaboration.enabled && !collaboration.canEdit) return;
     if (collaboration.enabled) {
-      collaboration.applyDocument(next);
+      collaboration.applyDocument(next, kind, targetId, changedFields);
       setSessionTouched(true);
       setSaveState("dirty");
       return;
     }
     commit(next);
+  }
+
+  function handleDocumentChange(next: EditorDocument) {
+    if (JSON.stringify(next) === JSON.stringify(collaborationDocument)) return;
+    if (collaboration.enabled) {
+      const delta = sharedDocumentDelta(collaborationDocument, next);
+      commitShared(next, delta.kind, delta.targetId, delta.changedFields);
+      return;
+    }
+    commitShared(next);
   }
 
   function handleAdjustmentPreview(key: AdjustmentKey, value: number) {
@@ -393,39 +427,23 @@ function EditorWorkspace({
     setAdjustmentPreview(null);
     if (document.adjustments[key] === value) return;
     const next = setAdjustment(collaborationDocument, key, value);
-    if (collaboration.enabled) {
-      collaboration.applyDocument(next, "adjustment.set");
-      setSessionTouched(true);
-      setSaveState("dirty");
-    } else commit(next);
+    commitShared(next, "adjustment.set", key, [`adjustments.${key}`]);
   }
 
   function handleLayerChange(id: string, patch: Partial<EditorLayer>) {
     const next = updateLayer(collaborationDocument, id, patch);
-    if (collaboration.enabled) {
-      collaboration.applyDocument(next, "layer.patch");
-      setSessionTouched(true);
-      setSaveState("dirty");
-    } else commit(next);
+    commitShared(next, "layer.patch", id, Object.keys(patch));
   }
 
   function handleLayerDelete(id: string) {
     const next = removeLayer(collaborationDocument, id);
-    if (collaboration.enabled) {
-      collaboration.applyDocument(next, "layer.delete");
-      setSessionTouched(true);
-      setSaveState("dirty");
-    } else commit(next);
+    commitShared(next, "layer.delete", id, ["layers"]);
     setSelectedLayerId(null);
   }
 
   function handleCropApply(crop: CropRect) {
     const next = setCrop(collaborationDocument, crop);
-    if (collaboration.enabled) {
-      collaboration.applyDocument(next, "crop.commit");
-      setSessionTouched(true);
-      setSaveState("dirty");
-    } else commit(next);
+    commitShared(next, "crop.commit", "crop", ["crop"]);
     setTool("select");
     message.success("裁切已应用");
   }
@@ -470,13 +488,19 @@ function EditorWorkspace({
     autosaveSuspendedRef.current = true;
     const snapshot = cloneDocument(effectiveDocument);
     try {
-      await persistSnapshot(snapshot, true);
+      if (collaboration.enabled) {
+        const checkpoint = await collaboration.checkpoint(snapshot, revisionRef.current);
+        revisionRef.current = checkpoint.revision;
+      } else {
+        await persistSnapshot(snapshot, true);
+      }
       const preview = await exportEditorDocument(snapshot, image, "image/png");
       const result = await saveEditorResult.mutateAsync({
         preview,
         mode: saveMode,
         name: copyName.trim(),
         expectedRevision: revisionRef.current,
+        collaborationEditorState: collaboration.enabled ? snapshot : undefined,
       });
       setSessionTouched(false);
       setSaveState("saved");
@@ -596,27 +620,30 @@ function EditorWorkspace({
           <span className="editor-brand-mark">茶</span>
           <div className="editor-title-copy">
             <Typography.Text strong>{picture.title}</Typography.Text>
-            <Typography.Text className="editor-save-state">{saveLabel}</Typography.Text>
+            <Typography.Text className="editor-save-state">
+              {collaboration.enabled ? collaborationStatusLabel(collaboration.status, collaboration.remoteCount) : saveLabel}
+            </Typography.Text>
           </div>
         </div>
         <EditorToolbar
           zoom={viewZoom}
-          canUndo={history.past.length > 0}
-          canRedo={history.future.length > 0}
-          onUndo={undo}
-          onRedo={redo}
-          onRotate={(delta) => commit(rotateDocument(document, delta))}
-          onFlip={(axis) => commit(flipDocument(document, axis))}
+           canUndo={collaboration.enabled ? collaboration.canUndo : history.past.length > 0}
+           canRedo={collaboration.enabled ? collaboration.canRedo : history.future.length > 0}
+          onUndo={undoShared}
+          onRedo={redoShared}
+           onRotate={(delta) => commitShared(rotateDocument(document, delta), "document.transform")}
+           onFlip={(axis) => commitShared(flipDocument(document, axis), "document.transform")}
           onZoom={(delta) => setViewZoom((value) => Math.min(4, Math.max(0.25, value + delta)))}
           onFitZoom={() => setViewZoom(1)}
           onSave={openSaveDialog}
           onOpenVersions={() => setVersionPanelOpen(true)}
           onDownload={() => void handleDownload()}
+          readOnly={collaboration.enabled && !collaboration.canEdit}
         />
       </header>
 
       <div className="editor-body">
-        <EditorToolRail tool={tool} onToolChange={setTool} />
+        <EditorToolRail tool={tool} onToolChange={setTool} readOnly={collaboration.enabled && !collaboration.canEdit} />
         <EditorCanvas
           document={collaboration.enabled ? collaborationDocument : canvasDocument}
           image={imageError ? null : image}
@@ -626,9 +653,11 @@ function EditorWorkspace({
           textColor={textColor}
           fontSize={fontSize}
           viewZoom={viewZoom}
+          readOnly={collaboration.enabled && !collaboration.canEdit}
           selectedLayerId={selectedLayerId}
           onSelectLayer={setSelectedLayerId}
-          onDocumentChange={handleDocumentChange}
+           onDocumentChange={handleDocumentChange}
+           onStrokeChunk={(next, layerId) => collaboration.applyStrokeChunk(next, layerId)}
           onCropApply={handleCropApply}
           onCropCancel={handleCropCancel}
         />
@@ -820,4 +849,36 @@ function defaultCopyName(sourceName: string): string {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function collaborationStatusLabel(status: CollaborationStatus, remoteCount: number): string {
+  if (status === "connecting" || status === "reconnecting") return "正在连接协作房间";
+  if (status === "error") return "协作连接异常";
+  return `协作中 · ${remoteCount + 1} 人在线`;
+}
+
+function sharedDocumentDelta(current: EditorDocument, next: EditorDocument): {
+  kind: string;
+  targetId: string | null;
+  changedFields: string[];
+} {
+  const currentLayers = new Map(current.layers.map((layer) => [layer.id, layer]));
+  const nextLayers = new Map(next.layers.map((layer) => [layer.id, layer]));
+  for (const layer of next.layers) {
+    const previous = currentLayers.get(layer.id);
+    if (!previous) return { kind: "layer.create", targetId: layer.id, changedFields: ["layer"] };
+    if (JSON.stringify(previous) !== JSON.stringify(layer)) {
+      const changedFields = Object.keys(layer).filter((key) => JSON.stringify(previous[key as keyof EditorLayer]) !== JSON.stringify(layer[key as keyof EditorLayer]));
+      return { kind: "layer.patch", targetId: layer.id, changedFields };
+    }
+  }
+  for (const layer of current.layers) {
+    if (!nextLayers.has(layer.id)) return { kind: "layer.delete", targetId: layer.id, changedFields: ["layer"] };
+  }
+  for (const key of Object.keys(current.adjustments) as AdjustmentKey[]) {
+    if (current.adjustments[key] !== next.adjustments[key]) return { kind: "adjustment.set", targetId: key, changedFields: [`adjustments.${key}`] };
+  }
+  if (JSON.stringify(current.crop) !== JSON.stringify(next.crop)) return { kind: "crop.commit", targetId: "crop", changedFields: ["crop"] };
+  if (JSON.stringify(current.transform) !== JSON.stringify(next.transform)) return { kind: "document.transform", targetId: "document", changedFields: ["transform"] };
+  return { kind: "document.patch", targetId: null, changedFields: ["editorState"] };
 }

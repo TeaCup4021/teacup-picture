@@ -24,6 +24,8 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 @Service
 public class CollaborationService {
@@ -31,6 +33,7 @@ public class CollaborationService {
     private static final int MAX_OPERATION_ID = 128;
     private static final int MAX_KIND = 48;
     private static final int MAX_TARGET_ID = 128;
+    private static final int UPDATE_PAGE_SIZE = 500;
 
     private final PictureMapper pictures;
     private final SpaceMapper spaces;
@@ -61,14 +64,15 @@ public class CollaborationService {
         Space space = spaces.selectById(picture.getSpaceId());
         if (space == null || !Integer.valueOf(SpaceTypeEnum.TEAM.getValue()).equals(space.getSpaceType())) {
             return new CollaborationDtos.Session(null, Long.toString(pictureId), null, "0", null,
-                    false, false, null);
+                    false, false, null, null);
         }
         String role = spaceAccess.roleOf(user, space);
         if (role == null) throw V1Exception.forbidden();
-        CollaborationRoom room = ensureRoom(pictureId);
+        CollaborationRoom room = ensureRoom(user, pictureId);
         return new CollaborationDtos.Session(Long.toString(room.getId()), Long.toString(pictureId),
                 room.getRoomEpoch(), Long.toString(room.getLastSeq()), role, true,
-                spaceAccess.canEdit(user, space), "/api/v1/ws/pictures/" + pictureId + "/collaboration");
+                spaceAccess.canEdit(user, space), "/api/v1/ws/pictures/" + pictureId + "/collaboration",
+                parseJson(room.getBaseEditorState()));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -78,7 +82,7 @@ public class CollaborationService {
         Space space = requireTeamSpace(picture);
         if (!spaceAccess.canEdit(user, space)) throw V1Exception.forbidden();
         validateRequest(request);
-        CollaborationRoom room = lockRoom(pictureId);
+        CollaborationRoom room = lockRoom(user, pictureId);
         if (!room.getRoomEpoch().equals(request.roomEpoch())) throw V1Exception.conflict("协作房间已切换，请重新连接");
         CollaborationUpdate existing = updates.selectByOperation(room.getId(), request.operationId());
         if (existing != null) return new CollaborationDtos.UpdateResult(toRecord(existing), true);
@@ -92,6 +96,7 @@ public class CollaborationService {
         entity.setGestureId(trimNullable(request.gestureId(), 128));
         entity.setKind(request.kind());
         entity.setTargetId(trimNullable(request.targetId(), MAX_TARGET_ID));
+        entity.setLockToken(trimNullable(request.lockToken(), MAX_OPERATION_ID));
         entity.setChangedFields(writeChangedFields(request.changedFields()));
         entity.setPhase(request.phase());
         entity.setYjsUpdate(request.yjsUpdate());
@@ -106,7 +111,28 @@ public class CollaborationService {
         Picture picture = requirePicture(user, pictureId);
         CollaborationRoom room = lockRoomRead(pictureId);
         if (!room.getRoomEpoch().equals(roomEpoch)) throw V1Exception.conflict("协作房间已切换，请重新连接");
-        return updates.selectAfter(room.getId(), Math.max(0, afterSeq)).stream().map(this::toRecord).toList();
+        return updates.selectAfter(room.getId(), Math.max(0, afterSeq), UPDATE_PAGE_SIZE).stream().map(this::toRecord).toList();
+    }
+
+    public CollaborationDtos.Bootstrap bootstrap(User user, long pictureId, String roomEpoch, long afterSeq) {
+        Picture picture = requirePicture(user, pictureId);
+        CollaborationRoom room = lockRoomRead(pictureId);
+        if (!room.getRoomEpoch().equals(roomEpoch)) throw V1Exception.conflict("协作房间已切换，请重新连接");
+        if (afterSeq < 0 || afterSeq > room.getLastSeq()) throw V1Exception.conflict("协作序号无效，请重新同步");
+        CollaborationSnapshot snapshot = snapshots.selectLatest(room.getId());
+        String snapshotState = null;
+        long startSeq = Math.max(0, afterSeq);
+        if (snapshot != null && startSeq < snapshot.getLastSeq()) {
+            snapshotState = snapshot.getYjsState();
+            startSeq = snapshot.getLastSeq();
+        }
+        List<CollaborationUpdate> page = updates.selectAfter(room.getId(), startSeq, UPDATE_PAGE_SIZE);
+        if (!page.isEmpty() && page.get(0).getServerSeq() != startSeq + 1) {
+            throw V1Exception.conflict("协作更新序号存在缺口，请重新获取基线");
+        }
+        long next = page.isEmpty() ? startSeq : page.get(page.size() - 1).getServerSeq();
+        return new CollaborationDtos.Bootstrap(snapshotState, Long.toString(snapshot == null ? 0 : snapshot.getLastSeq()),
+                page.stream().map(this::toRecord).toList(), next < room.getLastSeq(), Long.toString(next));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -114,14 +140,15 @@ public class CollaborationService {
                                                           CollaborationDtos.CheckpointRequest request) {
         CollaborationDtos.Session session = getSession(user, pictureId);
         if (!session.enabled() || !session.canEdit()) throw V1Exception.forbidden();
-        if (!session.roomEpoch().equals(request.roomEpoch())) throw V1Exception.conflict("协作房间已切换，请重新连接");
+        CollaborationRoom room = lockRoom(user, pictureId);
+        if (!room.getRoomEpoch().equals(request.roomEpoch())) throw V1Exception.conflict("协作房间已切换，请重新连接");
         long seq = parseLong(request.lastServerSeq(), -1);
-        if (seq < 0 || seq > parseLong(session.lastServerSeq(), 0)) throw V1Exception.conflict("协作序号无效");
+        if (seq < 0 || seq != room.getLastSeq()) throw V1Exception.conflict("协作序号不是最新值");
         if (request.yjsState() == null || request.yjsState().length() > MAX_UPDATE_CHARS * 4) {
             throw V1Exception.badRequest("协作快照过大");
         }
+        validateCheckpointHashes(request);
         var draft = m3Service.saveDraft(user, pictureId, request.editorState(), parseLong(request.expectedRevision(), null));
-        CollaborationRoom room = lockRoom(pictureId);
         CollaborationSnapshot snapshot = new CollaborationSnapshot();
         snapshot.setRoomId(room.getId());
         snapshot.setLastSeq(seq);
@@ -134,6 +161,24 @@ public class CollaborationService {
         snapshots.insert(snapshot);
         return new CollaborationDtos.CheckpointResult(room.getRoomEpoch(), Long.toString(seq),
                 Long.toString(draft.revision()));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void rotateRoomEpoch(User user, long pictureId, Object baselineEditorState) {
+        Picture picture = requirePicture(user, pictureId);
+        Space space = spaces.selectById(picture.getSpaceId());
+        if (space == null || !Integer.valueOf(SpaceTypeEnum.TEAM.getValue()).equals(space.getSpaceType())) return;
+        if (!spaceAccess.canEdit(user, space)) throw V1Exception.forbidden();
+        CollaborationRoom room = lockRoom(user, pictureId);
+        if (baselineEditorState == null) {
+            CollaborationSnapshot latest = snapshots.selectLatest(room.getId());
+            baselineEditorState = latest == null ? null : parseJson(latest.getEditorState());
+        }
+        room.setRoomEpoch(UUID.randomUUID().toString());
+        room.setLastSeq(0L);
+        room.setStatus("active");
+        room.setBaseEditorState(writeBaseline(user, picture, baselineEditorState));
+        rooms.updateById(room);
     }
 
     public CollaborationRoom roomFor(long pictureId) {
@@ -156,22 +201,29 @@ public class CollaborationService {
         return space;
     }
 
-    private CollaborationRoom ensureRoom(long pictureId) {
+    private CollaborationRoom ensureRoom(User user, long pictureId) {
         CollaborationRoom room = rooms.selectOne(new LambdaQueryWrapper<CollaborationRoom>()
                 .eq(CollaborationRoom::getPictureId, pictureId));
-        if (room != null) return room;
+        if (room != null) {
+            if (blank(room.getBaseEditorState())) {
+                room.setBaseEditorState(writeBaseline(user, pictures.selectById(pictureId), null));
+                rooms.updateById(room);
+            }
+            return room;
+        }
         room = new CollaborationRoom();
         room.setPictureId(pictureId);
         room.setRoomEpoch(UUID.randomUUID().toString());
         room.setLastSeq(0L);
         room.setStatus("active");
+        room.setBaseEditorState(writeBaseline(user, pictures.selectById(pictureId), null));
         rooms.insert(room);
         return room;
     }
 
-    private CollaborationRoom lockRoom(long pictureId) {
+    private CollaborationRoom lockRoom(User user, long pictureId) {
         CollaborationRoom room = rooms.lockByPictureId(pictureId);
-        if (room == null) room = ensureRoom(pictureId);
+        if (room == null) room = ensureRoom(user, pictureId);
         return room;
     }
 
@@ -205,9 +257,65 @@ public class CollaborationService {
         try { fields = objectMapper.readValue(value.getChangedFields(), objectMapper.getTypeFactory().constructCollectionType(List.class, String.class)); }
         catch (JsonProcessingException exception) { fields = List.of(); }
         return new CollaborationDtos.UpdateRecord(value.getOperationId(), value.getGestureId(), value.getKind(),
-                value.getTargetId(), fields, value.getPhase(), value.getYjsUpdate(),
+                value.getTargetId(), fields, value.getPhase(), value.getLockToken(), value.getYjsUpdate(),
                 Long.toString(value.getServerSeq()), Long.toString(value.getActorId()),
                 value.getCreateTime() == null ? Instant.now() : value.getCreateTime().toInstant());
+    }
+
+    private void validateCheckpointHashes(CollaborationDtos.CheckpointRequest request) {
+        if (blank(request.editorStateHash()) || blank(request.yjsStateHash())) {
+            throw V1Exception.badRequest("协作快照缺少状态哈希");
+        }
+        try {
+            String editorJson = objectMapper.writeValueAsString(request.editorState());
+            if (!sha256(editorJson).equalsIgnoreCase(request.editorStateHash())) {
+                throw V1Exception.conflict("编辑状态与校验哈希不一致");
+            }
+            byte[] state = Base64.getDecoder().decode(request.yjsState());
+            if (!sha256(state).equalsIgnoreCase(request.yjsStateHash())) {
+                throw V1Exception.conflict("Yjs 状态与校验哈希不一致");
+            }
+        } catch (JsonProcessingException | IllegalArgumentException exception) {
+            throw V1Exception.badRequest("协作快照格式无效");
+        }
+    }
+
+    private String writeBaseline(User user, Picture picture, Object value) {
+        try {
+            if (value != null) return objectMapper.writeValueAsString(value);
+            var draft = m3Service.getDraft(user, picture.getId());
+            if (draft.editorState() != null) return objectMapper.writeValueAsString(draft.editorState());
+        } catch (RuntimeException | JsonProcessingException ignored) {
+            // A room must still have a deterministic baseline when no draft exists.
+        }
+        try {
+            var baseline = objectMapper.createObjectNode();
+            baseline.put("schemaVersion", 3);
+            baseline.set("canvas", objectMapper.createObjectNode().put("width", valueOrOne(picture.getPicWidth())).put("height", valueOrOne(picture.getPicHeight())));
+            baseline.set("transform", objectMapper.createObjectNode().put("rotation", 0).put("scale", 1).put("flipX", false).put("flipY", false));
+            baseline.putNull("crop");
+            var adjustments = baseline.putObject("adjustments");
+            for (String key : List.of("exposure", "brightness", "contrast", "highlights", "shadows", "saturation", "vibrance", "temperature", "tint", "sharpness", "fade", "vignette", "enhance", "dehaze")) adjustments.put(key, 0);
+            baseline.putArray("layers");
+            return objectMapper.writeValueAsString(baseline);
+        } catch (JsonProcessingException exception) {
+            throw V1Exception.badRequest("协作基线生成失败");
+        }
+    }
+
+    private Object parseJson(String value) {
+        if (blank(value)) return null;
+        try { return objectMapper.readTree(value); } catch (JsonProcessingException exception) { return null; }
+    }
+
+    private static String sha256(String value) { return sha256(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+    private static String sha256(byte[] value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value);
+            StringBuilder result = new StringBuilder(digest.length * 2);
+            for (byte part : digest) result.append(String.format("%02x", part));
+            return result.toString();
+        } catch (NoSuchAlgorithmException exception) { throw new IllegalStateException(exception); }
     }
 
     private static String trimNullable(String value, int max) {
@@ -226,4 +334,6 @@ public class CollaborationService {
         if (value == null || value.isBlank()) return fallback;
         try { return Long.valueOf(value); } catch (NumberFormatException exception) { return fallback; }
     }
+
+    private static int valueOrOne(Integer value) { return value == null || value < 1 ? 1 : value; }
 }

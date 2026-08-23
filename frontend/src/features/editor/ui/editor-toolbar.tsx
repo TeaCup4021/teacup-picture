@@ -35,6 +35,7 @@ interface EditorToolbarProps {
   onSave: () => void;
   onOpenVersions: () => void;
   onDownload: () => void;
+  readOnly?: boolean;
 }
 
 const tools: Array<{ value: EditorTool; label: string; icon: ReactNode }> = [
@@ -49,9 +50,11 @@ const tools: Array<{ value: EditorTool; label: string; icon: ReactNode }> = [
 export function EditorToolRail({
   tool,
   onToolChange,
+  readOnly = false,
 }: {
   tool: EditorTool;
   onToolChange: (tool: EditorTool) => void;
+  readOnly?: boolean;
 }) {
   return (
     <div className="editor-tool-rail" role="toolbar" aria-label="编辑工具">
@@ -68,6 +71,7 @@ export function EditorToolRail({
             }
             icon={item.icon}
             aria-label={item.label}
+            disabled={readOnly}
             onClick={() => onToolChange(item.value)}
           >
             <span>{item.label}</span>
@@ -91,6 +95,7 @@ export function EditorToolbar({
   onSave,
   onOpenVersions,
   onDownload,
+  readOnly = false,
 }: EditorToolbarProps) {
   return (
     <div className="editor-toolbar" role="toolbar" aria-label="画布命令">
@@ -100,6 +105,7 @@ export function EditorToolbar({
             type="text"
             icon={<RotateLeftOutlined />}
             aria-label="向左旋转"
+            disabled={readOnly}
             onClick={() => onRotate(-90)}
           />
         </Tooltip>
@@ -108,6 +114,7 @@ export function EditorToolbar({
             type="text"
             icon={<RotateRightOutlined />}
             aria-label="向右旋转"
+            disabled={readOnly}
             onClick={() => onRotate(90)}
           />
         </Tooltip>
@@ -116,6 +123,7 @@ export function EditorToolbar({
             type="text"
             icon={<SwapOutlined />}
             aria-label="水平翻转画布"
+            disabled={readOnly}
             onClick={() => onFlip("horizontal")}
           />
         </Tooltip>
@@ -125,6 +133,7 @@ export function EditorToolbar({
             className="editor-flip-vertical"
             icon={<SwapOutlined />}
             aria-label="垂直翻转画布"
+            disabled={readOnly}
             onClick={() => onFlip("vertical")}
           />
         </Tooltip>
@@ -165,7 +174,7 @@ export function EditorToolbar({
             type="text"
             icon={<UndoOutlined />}
             aria-label="撤销"
-            disabled={!canUndo}
+            disabled={readOnly || !canUndo}
             onClick={onUndo}
           />
         </Tooltip>
@@ -174,7 +183,7 @@ export function EditorToolbar({
             type="text"
             icon={<RedoOutlined />}
             aria-label="重做"
-            disabled={!canRedo}
+            disabled={readOnly || !canRedo}
             onClick={onRedo}
           />
         </Tooltip>
@@ -194,7 +203,7 @@ export function EditorToolbar({
           </Button>
         </Tooltip>
         <Tooltip title="保存图片">
-          <Button type="primary" icon={<SaveOutlined />} aria-label="保存图片" onClick={onSave}>
+          <Button type="primary" icon={<SaveOutlined />} aria-label="保存图片" disabled={readOnly} onClick={onSave}>
             保存
           </Button>
         </Tooltip>

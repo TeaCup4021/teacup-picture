@@ -19,6 +19,7 @@ public class CollaborationUpdate {
     private String gestureId;
     private String kind;
     private String targetId;
+    private String lockToken;
     private String changedFields;
     private String phase;
     private String yjsUpdate;

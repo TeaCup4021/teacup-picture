@@ -36,7 +36,7 @@ export const editorApi = {
 
   async checkpointCollaboration(
     pictureId: string,
-    input: { roomEpoch: string; lastServerSeq: string; yjsState: string; editorState: EditorDocument; expectedRevision: string | null },
+    input: { roomEpoch: string; lastServerSeq: string; yjsState: string; editorStateHash: string; yjsStateHash: string; editorState: EditorDocument; expectedRevision: string | null },
   ): Promise<{ roomEpoch: string; lastServerSeq: string; revision: string }> {
     return post(`/pictures/${pictureId}/collaboration/checkpoint`, input);
   },
@@ -113,12 +113,14 @@ export const editorApi = {
     mode: EditorSaveMode,
     name: string,
     expectedRevision: string | null,
+    collaborationEditorState?: EditorDocument,
   ): Promise<EditorSaveResult> {
     const body = new FormData();
     body.append("file", preview, "edited.png");
     body.append("mode", mode);
     if (mode === "copy") body.append("name", name);
     if (expectedRevision !== null) body.append("expectedRevision", expectedRevision);
+    if (collaborationEditorState) body.append("collaborationEditorState", JSON.stringify(normalizeEditorDocument(collaborationEditorState)));
     return unwrapApiResponse(
       (
         await apiClient.post<ApiEnvelope<EditorSaveResult>>(

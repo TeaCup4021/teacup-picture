@@ -1,0 +1,110 @@
+openapi: 3.0.3
+info:
+  title: Teacup Picture M5 Collaboration API
+  version: 0.1.0
+  description: HTTP bootstrap/checkpoint contract for the Yjs collaboration room. WebSocket message envelopes are documented in ../m5-api-contract.md.
+servers:
+  - url: /api/v1
+paths:
+  /pictures/{pictureId}/collaboration/session:
+    get:
+      summary: Get the collaboration room for a team picture
+      operationId: getCollaborationSession
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/PictureId'
+      responses:
+        '200':
+          description: Session information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeSession'
+        '401': { description: Unauthenticated }
+        '403': { description: Not allowed to view the picture }
+        '404': { description: Picture not found or not visible }
+  /pictures/{pictureId}/collaboration/checkpoint:
+    post:
+      summary: Persist a collaboration checkpoint
+      operationId: createCollaborationCheckpoint
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/PictureId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckpointRequest'
+      responses:
+        '200':
+          description: Checkpoint persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeCheckpoint'
+        '401': { description: Unauthenticated }
+        '403': { description: Editing is not allowed }
+        '409': { description: Room sequence or revision is stale }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: TEACUP_SESSION
+  parameters:
+    PictureId:
+      name: pictureId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[0-9]+$' }
+  schemas:
+    Session:
+      type: object
+      required: [pictureId, lastServerSeq, enabled, canEdit]
+      properties:
+        roomId: { type: string, nullable: true }
+        pictureId: { type: string }
+        roomEpoch: { type: string, nullable: true }
+        lastServerSeq: { type: string }
+        role: { type: string, nullable: true, enum: [owner, admin, editor, viewer] }
+        enabled: { type: boolean }
+        canEdit: { type: boolean }
+        wsPath: { type: string, nullable: true }
+        baselineEditorState: { type: object, nullable: true, description: Persisted EditorState v3 baseline }
+    CheckpointRequest:
+      type: object
+      required: [roomEpoch, lastServerSeq, yjsState, editorState, editorStateHash, yjsStateHash]
+      properties:
+        roomEpoch: { type: string, maxLength: 64 }
+        lastServerSeq: { type: string, pattern: '^[0-9]+$' }
+        yjsState: { type: string, description: Base64 encoded Yjs state }
+        editorStateHash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        yjsStateHash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        editorState: { type: object, description: EditorState v3 }
+        expectedRevision: { type: string, nullable: true }
+    Checkpoint:
+      type: object
+      required: [roomEpoch, lastServerSeq, revision]
+      properties:
+        roomEpoch: { type: string }
+        lastServerSeq: { type: string }
+        revision: { type: string }
+    EnvelopeSession:
+      type: object
+      required: [code, data, message, requestId]
+      properties:
+        code: { type: integer }
+        data: { $ref: '#/components/schemas/Session' }
+        message: { type: string }
+        requestId: { type: string }
+    EnvelopeCheckpoint:
+      type: object
+      required: [code, data, message, requestId]
+      properties:
+        code: { type: integer }
+        data: { $ref: '#/components/schemas/Checkpoint' }
+        message: { type: string }
+        requestId: { type: string }

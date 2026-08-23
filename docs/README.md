@@ -19,8 +19,10 @@
 | `openapi/m1.yaml` | M1 机器可读 API 契约 | 已实现 |
 | `openapi/m2.yaml` | M2 AI 模型、任务与配额契约 | 已实现 |
 | `openapi/m3.yaml` | M3 EditorState v3、草稿、图片保存与版本契约 | 已实现 |
+| `openapi/m5.yaml` | M5 协作会话与 checkpoint 契约 | M5-R 基础闭环 |
 | `m1-api-contract.md` | M1 契约的关键决策与边界 | 已实现 |
 | `m3-api-contract.md` | M3 契约的关键决策与边界 | 已实现 |
+| `m5-api-contract.md` | M5 Yjs 协作房间、更新日志和 checkpoint 契约 | M5-R 基础闭环 |
 | `backend-gap-analysis.md` | 代码事实、阻断项和后续后端工作 | 持续维护 |
 | `picture-storage.md` | 单一 MinIO 图片存储架构、前后端边界和迁移规则 | 已实现 |
 | `ui-design/README.md` | UI v1.1 入口、页面状态与产品图索引 | 持续维护 |

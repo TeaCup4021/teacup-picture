@@ -24,6 +24,7 @@ export interface SaveEditorResultInput {
   mode: EditorSaveMode;
   name: string;
   expectedRevision: string | null;
+  collaborationEditorState?: EditorDocument;
 }
 
 const keys = {
@@ -102,6 +103,7 @@ export function useSaveEditorResult(pictureId: string) {
         input.mode,
         input.name,
         input.expectedRevision,
+        input.collaborationEditorState,
       ),
     onSuccess: async () => {
       queryClient.setQueryData(keys.draft(pictureId), null);
