@@ -28,7 +28,8 @@ public final class M1Dtos {
                                 int width, int height, String format, String dominantColor,
                                 String visibility, String publishStatus, AuthorSummary author,
                                 Instant createdAt, Instant updatedAt, String url,
-                                List<String> permissions, String rejectionReason, Instant reviewedAt) {}
+                                List<String> permissions, String currentVersionId,
+                                String rejectionReason, Instant reviewedAt) {}
     public record PublicPictureSummary(String id, String thumbnailUrl, String name,
                                        String introduction, String category, List<String> tags,
                                        int width, int height, String dominantColor,
@@ -37,7 +38,7 @@ public final class M1Dtos {
                                       String introduction, String category, List<String> tags,
                                       int width, int height, String dominantColor,
                                       AuthorSummary author, Instant publishedAt, String url,
-                                      long size, String format) {}
+                                      long size, String format, String currentVersionId) {}
     public record PublishRequestView(String id, PictureSummary picture, AuthorSummary requester,
                                      String status, AuthorSummary reviewer, String decisionReason,
                                      Instant createdAt, Instant reviewedAt) {}

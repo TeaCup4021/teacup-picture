@@ -56,6 +56,14 @@ test("M3 editor completes editing, replace, save-as, and restore flows", async (
   await page.getByLabel("密码", { exact: true }).fill(password);
   await page.getByRole("button", { name: /登\s*录/ }).click();
   await page.waitForURL(/\/spaces\/personal$/);
+  const sessionContext = await page.evaluate(() =>
+    window.sessionStorage.getItem("teacup.session-context"),
+  );
+  expect(sessionContext).toBeTruthy();
+  const getWithSession = (url: string) =>
+    page.request.get(url, {
+      headers: { "X-Teacup-Session-Context": sessionContext! },
+    });
 
   await page.goto("/upload");
   await page.locator('input[type="file"]').setInputFiles("public/mock-images/gallery-06.jpg");
@@ -65,10 +73,14 @@ test("M3 editor completes editing, replace, save-as, and restore flows", async (
   await page.waitForURL(/\/pictures\/\d+$/);
   const pictureId = page.url().match(/\/pictures\/(\d+)/)?.[1];
   expect(pictureId).toBeTruthy();
-  const originalContentResponse = await page.request.get(
+  const originalContentResponse = await getWithSession(
     `${apiBaseUrl}/pictures/${pictureId}/content?variant=original`,
   );
-  expect(originalContentResponse.ok()).toBe(true);
+  if (!originalContentResponse.ok()) {
+    throw new Error(
+      `Original content request failed with ${originalContentResponse.status()}: ${await originalContentResponse.text()}`,
+    );
+  }
   const originalContent = await originalContentResponse.body();
   const editButton = page.getByRole("link", { name: /编辑图片/ });
   await expect(editButton).toBeVisible();
@@ -135,7 +147,7 @@ test("M3 editor completes editing, replace, save-as, and restore flows", async (
     .click();
   await page.waitForURL(`/pictures/${pictureId}`);
   const discardedInitialDraft = (await (
-    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
+    await getWithSession(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
   ).json()) as EditorStateEnvelope;
   expect(discardedInitialDraft.data.editorState).toBeNull();
   expect(discardedInitialDraft.data.revision).toBeNull();
@@ -181,14 +193,17 @@ test("M3 editor completes editing, replace, save-as, and restore flows", async (
   await page.keyboard.type("验收文字");
   await page.getByRole("button", { name: "选择", exact: true }).click();
   await page.getByRole("tab", { name: "对象属性" }).click();
+  await expect(page.getByRole("textbox", { name: "内容" })).toHaveValue("验收文字");
   const textWidth = page.getByRole("spinbutton", { name: "文本框宽度" });
   await textWidth.fill("260");
   await textWidth.press("Enter");
-  await page
+  await expect(textWidth).toHaveValue("260");
+  const horizontalLayerFlip = page
     .locator(".editor-layer-flips")
     .getByRole("button")
-    .filter({ hasText: "水平翻转" })
-    .click();
+    .filter({ hasText: "水平翻转" });
+  await horizontalLayerFlip.click();
+  await expect(horizontalLayerFlip).toHaveClass(/ant-btn-primary/);
 
   const baseBeforeDrawing = await page
     .locator(".editor-base-canvas")
@@ -238,7 +253,7 @@ test("M3 editor completes editing, replace, save-as, and restore flows", async (
   await page.waitForTimeout(1_200);
 
   const draft = (await (
-    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
+    await getWithSession(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
   ).json()) as EditorStateEnvelope;
   const draftDocument = draft.data.editorState!;
   expect(draftDocument).toMatchObject({
@@ -274,19 +289,19 @@ test("M3 editor completes editing, replace, save-as, and restore flows", async (
   await saveDialog.getByRole("button", { name: "确认保存" }).click();
   await page.waitForURL(`/pictures/${pictureId}`);
   const draftAfterReplace = (await (
-    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
+    await getWithSession(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
   ).json()) as EditorStateEnvelope;
   expect(draftAfterReplace.data.editorState).toBeNull();
   expect(draftAfterReplace.data.revision).toBeNull();
 
-  const replacedContentResponse = await page.request.get(
+  const replacedContentResponse = await getWithSession(
     `${apiBaseUrl}/pictures/${pictureId}/content?variant=original`,
   );
   const replacedContent = await replacedContentResponse.body();
   expect(Buffer.compare(replacedContent, originalContent)).not.toBe(0);
 
   let versionHistory = (await (
-    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/versions`)
+    await getWithSession(`${apiBaseUrl}/pictures/${pictureId}/versions`)
   ).json()) as VersionsEnvelope;
   expect(versionHistory.data.items.map((version) => version.sourceType)).toEqual([
     "user_save",
@@ -313,7 +328,7 @@ test("M3 editor completes editing, replace, save-as, and restore flows", async (
   expect(copyPictureId).not.toBe(pictureId);
 
   const copyDetail = (await (
-    await page.request.get(`${apiBaseUrl}/pictures/${copyPictureId}`)
+    await getWithSession(`${apiBaseUrl}/pictures/${copyPictureId}`)
   ).json()) as PictureEnvelope;
   expect(copyDetail.data).toMatchObject({
     id: copyPictureId,
@@ -322,7 +337,7 @@ test("M3 editor completes editing, replace, save-as, and restore flows", async (
     publishStatus: "not_requested",
   });
   const originalAfterCopy = await (
-    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/content?variant=original`)
+    await getWithSession(`${apiBaseUrl}/pictures/${pictureId}/content?variant=original`)
   ).body();
   expect(Buffer.compare(originalAfterCopy, replacedContent)).toBe(0);
 
@@ -340,17 +355,17 @@ test("M3 editor completes editing, replace, save-as, and restore flows", async (
   await page.getByText("已恢复为当前版本").waitFor();
   await page.waitForURL(`/pictures/${pictureId}`);
   const draftAfterRestore = (await (
-    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
+    await getWithSession(`${apiBaseUrl}/pictures/${pictureId}/editor-state`)
   ).json()) as EditorStateEnvelope;
   expect(draftAfterRestore.data.editorState).toBeNull();
   expect(draftAfterRestore.data.revision).toBeNull();
   const restoredContent = await (
-    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/content?variant=original`)
+    await getWithSession(`${apiBaseUrl}/pictures/${pictureId}/content?variant=original`)
   ).body();
   expect(Buffer.compare(restoredContent, originalContent)).toBe(0);
 
   versionHistory = (await (
-    await page.request.get(`${apiBaseUrl}/pictures/${pictureId}/versions`)
+    await getWithSession(`${apiBaseUrl}/pictures/${pictureId}/versions`)
   ).json()) as VersionsEnvelope;
   expect(versionHistory.data.items.map((version) => version.sourceType)).toEqual([
     "restore",

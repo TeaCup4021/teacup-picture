@@ -2,7 +2,6 @@
 
 import {
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useReducer,
@@ -239,7 +238,6 @@ function EditorWorkspace({
         : document,
     [adjustmentPreview, document],
   );
-  const canvasDocument = useDeferredValue(effectiveDocument);
   const documentRef = useRef(collaborationDocument);
   const revisionRef = useRef<string | null>(initialDraft?.revision ?? null);
   const lastSavedRef = useRef<EditorDocument | null>(
@@ -645,7 +643,7 @@ function EditorWorkspace({
       <div className="editor-body">
         <EditorToolRail tool={tool} onToolChange={setTool} readOnly={collaboration.enabled && !collaboration.canEdit} />
         <EditorCanvas
-          document={collaboration.enabled ? collaborationDocument : canvasDocument}
+          document={collaboration.enabled ? collaborationDocument : effectiveDocument}
           image={imageError ? null : image}
           tool={tool}
           strokeColor={strokeColor}

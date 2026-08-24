@@ -101,6 +101,9 @@ public class Picture {
      */
     private Long spaceId;
 
+    /** Current immutable asset version used by annotations. */
+    private Long currentVersionId;
+
     /**
      * 创建时间
      */

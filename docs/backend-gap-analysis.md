@@ -1,6 +1,6 @@
 # 后端缺口分析
 
-更新日期：2026-08-16
+更新日期：2026-08-24
 
 本文以当前 `backend/` 实现和 `docs/product-prd.md` 为基线，记录前端接入前必须确认的后端事实、缺口和建议顺序。它不是已经实现的接口文档。
 
@@ -15,7 +15,7 @@
 | 完成 | M1 公开审核闭环 | 独立申请记录、管理员审核/撤回、匿名公开列表与详情已实现 |
 | 完成 | M2 AI 任务与配额 | 统一任务、模型能力、独立额度、幂等、取消、超时、结果入库和鉴权下载已实现；公网部署安全闸门仍未完成 |
 | 完成 | M3-R 版本与单人编辑器 | EditorState v3（兼容 v2）、裁切、完整调节、统一预览/导出、草稿、不可变版本和前端生产验收已闭环 |
-| P1 | 邀请、评论、分享 | 数据表、实体、服务和接口均缺失 |
+| 部分完成 | 邀请、评论、分享 | M6 评论、批注、下载和分享已闭环；M4 邀请流程仍待完成 |
 | 完成（单实例） | 协作持久化模型 | M5 已有持久化基线、serverSeq、operationId 幂等、分页补偿、序号缺口检测、snapshot、hash checkpoint、显式对象锁和恢复 epoch 切换；跨实例广播/分布式锁/日志压缩仍是生产扩展 |
 | P2 | 安全加固 | 除凭据清理外按本文安全闸门暂缓，但必须在公网部署前完成 |
 
@@ -158,18 +158,20 @@ M2 已通过 `V3__add_m2_ai_workflow.sql`、`V6__harden_m2_ai_workflow.sql`、`V
 
 ## 7. 邀请、评论、分享与协作数据模型
 
-当前 Java 实体已包括 `User`、`Picture`、`Space`、`SpaceUser`、`PictureDraft`、`PictureVersion`；下列模型仍未实现。表名仅为建议，最终通过领域评审和 Flyway 迁移确定。
+M5 协作和 M6 评论/分享模型已经实现；邀请流程仍待完成。当前结构以 Flyway 和实体为准：
 
 | 模型 | 核心字段/约束 | 关键行为 |
 | --- | --- | --- |
 | `space_invitation` | space、inviter、invitee、role、status、expires_at；有效邀请唯一 | 创建、接受、拒绝、过期；接受时事务写成员并通知 |
 | `notification` | user、type、actor、resource、payload、read_at | 邀请和评论通知；批量已读；不可依赖前端临时状态 |
-| `picture_comment` | picture、version、author、parent、body、position、status | 评论、回复、删除、解决；位置批注绑定明确版本 |
-| `picture_share` | picture、creator、token_hash、password_hash、expires_at、revoked_at、permissions | 原始 token 只返回一次；支持口令、有效期和撤销 |
+| `picture_comment` / `comment_mention` | picture、version、author、root/reply、body、position、status；comment/user 复合主键 | M6 已实现评论、回复、结构化提及、软删除和解决；位置批注绑定明确版本 |
+| `picture_share` | picture、creator、public_id、secret_hash、password_hash、expires_at、revoked_at | M6 已实现；原始片段密钥只返回一次，支持密码、有效期、撤销和单活动链接约束 |
 | `collaboration_operation` | picture、version、operation_id、actor、server_seq、base_version、object_id、payload | 操作 ID 幂等、服务端排序、断线补偿和审计 |
 | `collaboration_snapshot` | picture、version、last_seq、editor_state、created_at | 加速加入房间和历史恢复；与操作日志边界明确 |
 
 M5 新增 `/api/v1/ws/pictures/{pictureId}/collaboration`、`V15__m5_collaboration.sql` 和 `V16__m5_collaboration_reliability.sql`。Yjs update 以 base64 写入 `collaboration_update`，服务端在数据库事务中分配房间 `serverSeq`，再 ACK/广播；加入房间时按持久化基线、最新 snapshot 和分页增量日志恢复，并拒绝序号缺口。前端使用 Yjs/Y.Text/字段级 Y.Map/Y.Array，并用 IndexedDB 保存本地文档和未确认更新。对象锁已具备显式申请、续期、释放和 token 校验；正式替换/恢复在事务内轮换 epoch。当前广播和锁仍是单个 Spring 进程内实现，不能在多实例部署中保证全局互斥；Redis Pub/Sub/分布式锁、更新压缩、连接限流和真实多人 E2E 仍是生产验收项。
+
+M6 新增 `V17__establish_current_picture_version.sql` 和 `V18__add_m6_shares_and_comments.sql`，为现有图片回填当前不可变版本，并创建分享、讨论和提及关系。`/api/v1` 已提供分享管理、片段密钥校验、Session 授权内容、登录下载、公开撤回、讨论分页、回复、提及、解决和删除接口。分享密码和评论频率使用 Redis 限流，依赖不可用时返回 `50300` 并失败关闭；图片内容仍只经 `PictureStorage` 读取私有 MinIO。V17/V18 已在 Docker Compose 的 MySQL 8 上由真实 Flyway 启动成功执行，Redis、MinIO 参与的受密码分享、评论和下载流程也已通过完整 Playwright。后端 101 项测试、前端 46 项测试、生产构建和两个页面的三视口人工走查均通过，M6 不再保留本地基础设施验收缺口。
 
 ## 8. 暂缓的安全问题
 
@@ -182,7 +184,7 @@ M5 新增 `/api/v1/ws/pictures/{pictureId}/collaboration`、`V15__m5_collaborati
 
 - 固定盐 MD5 密码哈希迁移到 Argon2id 或 BCrypt；同时统一注册与登录密码长度规则。
 - Cookie 已实现 `HttpOnly`、`SameSite=Lax`、登录会话轮换和退出失效；生产 `Secure` 与写操作 CSRF 防护仍需完成。
-- 登录、注册、评论、分享口令和 AI 调用的用户/IP 限流、失败退避与审计。
+- 登录、注册和 AI 调用的用户/IP 限流、失败退避与审计；M6 评论频率和分享口令已加入 Redis 基础限流，但公网代理 IP 解析与安全审计仍需加固。
 - URL 导入已限制 HTTP(S)、禁止私网解析、禁止重定向，并限制响应大小和超时；公网部署前仍需进行 DNS 重绑定和代理环境专项测试。
 - 上传已限制 20 MB，校验扩展名、MIME/魔数和图片解码；后续需补畸形图片与解压炸弹专项测试。
 - WebSocket Origin 白名单、Cookie 鉴权、连接限额、消息大小和频率限制。
@@ -209,5 +211,6 @@ M5 新增 `/api/v1/ws/pictures/{pictureId}/collaboration`、`V15__m5_collaborati
 5. ~~实现 AI 任务与独立配额。~~ M2 已完成。
 6. ~~实现单人编辑器与版本持久化闭环。~~ M3-R 已完成全量生产验收；下一阶段进入 M4 团队与邀请。
 7. ~~在版本和操作持久化模型稳定后，再重构实时协作协议。~~ M5-R 已完成基础协议和持久化；后续补齐跨实例广播、分布式锁、日志压缩和版本恢复原子切换。
+8. ~~实现下载、受控分享、评论、提及和版本批注闭环。~~ M6 已完成代码、契约、MySQL/Flyway 迁移、完整 Playwright 和三视口走查。
 
 每个阶段都必须有数据库迁移、服务层测试、控制器契约测试和鉴权测试；不能只以接口能返回成功作为完成标准。

@@ -30,7 +30,10 @@ test("registers, uploads, reviews, and publishes a picture", async ({ page, cont
   await expect(page).toHaveURL(/\/spaces\/personal$/);
   await expect.poll(async () => (await context.cookies()).some((cookie) => cookie.name === "TEACUP_SESSION")).toBe(true);
 
-  await page.getByRole("link", { name: /上传图片/ }).click();
+  await page
+    .getByRole("navigation", { name: "工作台导航" })
+    .getByRole("link", { name: /上传图片/ })
+    .click();
   await page.locator('input[type="file"]').setInputFiles("public/mock-images/gallery-06.jpg");
   await page.getByLabel("图片名称").fill(pictureName);
   await page.getByLabel("简介").fill("真实后端上传、审核与公开图库闭环验证");

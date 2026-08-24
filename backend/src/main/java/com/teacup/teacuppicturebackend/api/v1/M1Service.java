@@ -36,7 +36,7 @@ import java.util.Objects;
 
 @Service
 public class M1Service {
-    private static final List<String> OWNER_PERMISSIONS = List.of("picture:view", "picture:upload", "picture:edit", "picture:delete", "picture:publish");
+    private static final List<String> OWNER_PERMISSIONS = List.of("picture:view", "picture:upload", "picture:edit", "picture:delete", "picture:publish", "picture:share");
     private final UserService userService;
     private final PersonalSpaceService personalSpaceService;
     private final SpaceService spaceService;
@@ -46,12 +46,13 @@ public class M1Service {
     private final PictureStorage storage;
     private final PictureAssetService assets;
     private final SpaceAccessService spaceAccess;
+    private final PictureCurrentVersionService currentVersions;
 
     @Autowired
     public M1Service(UserService userService, PersonalSpaceService personalSpaceService, SpaceService spaceService,
                      PictureMapper pictureMapper, PublishRequestMapper publishRequestMapper,
                       UserMapper userMapper, PictureStorage storage, PictureAssetService assets,
-                      SpaceAccessService spaceAccess) {
+                       SpaceAccessService spaceAccess, PictureCurrentVersionService currentVersions) {
         this.userService = userService;
         this.personalSpaceService = personalSpaceService;
         this.spaceService = spaceService;
@@ -61,6 +62,7 @@ public class M1Service {
         this.storage = storage;
         this.assets = assets;
         this.spaceAccess = spaceAccess;
+        this.currentVersions = currentVersions;
     }
 
     /** Kept for pre-M4 focused unit tests; runtime injection uses SpaceAccessService. */
@@ -68,7 +70,7 @@ public class M1Service {
                      PictureMapper pictureMapper, PublishRequestMapper publishRequestMapper,
                      UserMapper userMapper, PictureStorage storage, PictureAssetService assets) {
         this(userService, personalSpaceService, spaceService, pictureMapper, publishRequestMapper,
-                userMapper, storage, assets, null);
+                userMapper, storage, assets, null, null);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -258,7 +260,7 @@ public class M1Service {
         Picture picture = requirePicture(pictureId);
         if (!"public".equals(picture.getVisibility()) || !"approved".equals(picture.getPublishStatus())) throw V1Exception.notFound();
         User author = userMapper.selectById(picture.getUserId()); M1Dtos.PublicPictureSummary summary = publicSummary(picture, author);
-        return new M1Dtos.PublicPictureDetail(summary.id(), summary.thumbnailUrl(), summary.name(), summary.introduction(), summary.category(), summary.tags(), summary.width(), summary.height(), summary.dominantColor(), summary.author(), summary.publishedAt(), assets.publicUrl(picture.getId(), "original"), nz(picture.getPicSize()), picture.getPicFormat());
+        return new M1Dtos.PublicPictureDetail(summary.id(), summary.thumbnailUrl(), summary.name(), summary.introduction(), summary.category(), summary.tags(), summary.width(), summary.height(), summary.dominantColor(), summary.author(), summary.publishedAt(), assets.publicUrl(picture.getId(), "original"), nz(picture.getPicSize()), picture.getPicFormat(), id(picture.getCurrentVersionId()));
     }
 
     private M1Dtos.PictureDetail savePictureWithCompensation(User user, Space space, PictureStorage.StoredPicture stored,
@@ -284,6 +286,7 @@ public class M1Service {
         picture.setPicScale(Math.round(stored.width() * 100.0 / stored.height()) / 100.0); picture.setPicFormat(stored.format());
         picture.setUserId(user.getId()); picture.setSpaceId(space.getId()); picture.setVisibility("private"); picture.setPublishStatus("not_requested"); picture.setReviewStatus(0);
         pictureMapper.insert(picture);
+        if (currentVersions != null) currentVersions.createInitial(picture, user.getId(), "original");
         spaceService.lambdaUpdate().eq(Space::getId, space.getId()).setSql("totalSize = totalSize + " + stored.size()).setSql("totalCount = totalCount + 1").update();
         return detail(picture, user);
     }
@@ -326,7 +329,7 @@ public class M1Service {
             Space space = spaceService.getById(p.getSpaceId());
             permissions = space == null ? List.of() : spaceAccess.permissions(viewer, space);
         }
-        return new M1Dtos.PictureDetail(s.id(), s.spaceId(), s.thumbnailUrl(), s.name(), s.introduction(), s.category(), s.tags(), s.size(), s.width(), s.height(), s.format(), s.dominantColor(), s.visibility(), s.publishStatus(), s.author(), s.createdAt(), s.updatedAt(), assets.privateUrl(p.getId(), "original"), permissions, "rejected".equals(p.getPublishStatus()) ? p.getReviewMessage() : null, instant(p.getReviewTime()));
+        return new M1Dtos.PictureDetail(s.id(), s.spaceId(), s.thumbnailUrl(), s.name(), s.introduction(), s.category(), s.tags(), s.size(), s.width(), s.height(), s.format(), s.dominantColor(), s.visibility(), s.publishStatus(), s.author(), s.createdAt(), s.updatedAt(), assets.privateUrl(p.getId(), "original"), permissions, id(p.getCurrentVersionId()), "rejected".equals(p.getPublishStatus()) ? p.getReviewMessage() : null, instant(p.getReviewTime()));
     }
     private M1Dtos.PublicPictureSummary publicSummary(Picture p, User user) { return new M1Dtos.PublicPictureSummary(id(p.getId()), assets.publicUrl(p.getId(), "thumbnail"), p.getName(), p.getIntroduction(), p.getCategory(), tags(p), nzi(p.getPicWidth()), nzi(p.getPicHeight()), p.getPicColor(), author(user), instant(p.getPublishedAt())); }
     private M1Dtos.AuthorSummary author(User u) { return new M1Dtos.AuthorSummary(id(u.getId()), u.getUserName(), u.getUserAvatar()); }

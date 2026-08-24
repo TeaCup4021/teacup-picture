@@ -10,7 +10,7 @@ async function request<T>(method: "get" | "post" | "patch" | "delete", url: stri
 }
 
 function toPicture(value: { id: string; spaceId?: string; thumbnailUrl: string; url?: string; name: string; introduction?: string | null; category?: string | null; tags: string[]; width: number; height: number; publishStatus?: PrototypePicture["publishStatus"]; author: { id: string; name: string }; createdAt?: string; updatedAt?: string }): PrototypePicture {
-  return { id: value.id, title: value.name, description: value.introduction ?? "暂无描述", imageUrl: value.url ?? value.thumbnailUrl, width: value.width, height: value.height, authorId: value.author.id, authorName: value.author.name, spaceId: value.spaceId ?? "", category: value.category ?? "未分类", tags: value.tags, createdAt: value.createdAt ?? new Date().toISOString(), views: 0, likes: 0, publishStatus: value.publishStatus ?? "not_requested" };
+  return { id: value.id, title: value.name, description: value.introduction ?? "暂无描述", imageUrl: value.url ?? value.thumbnailUrl, width: value.width, height: value.height, authorId: value.author.id, authorName: value.author.name, spaceId: value.spaceId ?? "", category: value.category ?? "未分类", tags: value.tags, createdAt: value.createdAt ?? new Date().toISOString(), views: 0, likes: 0, publishStatus: value.publishStatus ?? "not_requested", permissions: [], visibility: value.publishStatus === "approved" ? "public" : "private" };
 }
 
 export const teamApi = {

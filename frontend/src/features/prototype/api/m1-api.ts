@@ -14,6 +14,7 @@ interface ApiPicture {
   introduction?: string | null; category?: string | null; tags: string[]; width: number;
   height: number; publishStatus?: PrototypePicture["publishStatus"]; author: ApiAuthor;
   createdAt?: string; publishedAt?: string; rejectionReason?: string | null;
+  currentVersionId?: string | null; permissions?: string[]; visibility?: "private" | "public";
 }
 interface ApiPublishRequest { id: string; picture: ApiPicture; decisionReason?: string | null }
 interface ApiPage<T> { items: T[] }
@@ -41,6 +42,9 @@ function picture(value: ApiPicture, requestId?: string): PrototypePicture {
     publishStatus: value.publishStatus ?? "approved",
     reviewNote: value.rejectionReason ?? undefined,
     reviewRequestId: requestId,
+    currentVersionId: value.currentVersionId ?? undefined,
+    permissions: value.permissions ?? [],
+    visibility: value.visibility ?? (value.publishStatus === "approved" ? "public" : "private"),
   };
 }
 

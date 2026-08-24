@@ -1,10 +1,10 @@
 # 茶杯图库 UI 设计基线
 
-> 当前版本：UI v1.1
+> 当前版本：UI v1.2
 >
-> 更新日期：2026-08-16
+> 更新日期：2026-08-24
 >
-> 状态：M1～M3 已实现开发闭环；M4～M7 为规划设计
+> 状态：M1～M3、M6 已实现开发闭环；M4、M7 仍含规划设计
 >
 > 视觉方向：飞书式协作效率 + 图片内容发现，不复制任何品牌界面
 
@@ -37,7 +37,8 @@
 | 路由/模块                           | 规范                                               | 里程碑 | 当前状态 | 产品图                                                                             |
 | ----------------------------------- | -------------------------------------------------- | ------ | -------- | ---------------------------------------------------------------------------------- |
 | `/`                                 | [公开图库](pages/public-gallery.md)                | M1     | 已实现   | [public-gallery.png](references/public-gallery.png)                                |
-| `/pictures/[pictureId]`             | [图片详情](pages/picture-detail.md)                | M1/M6  | M1 已实现 | [picture-detail.png](references/picture-detail.png)                                |
+| `/pictures/[pictureId]`             | [图片详情](pages/picture-detail.md)                | M1/M6  | 已实现   | [picture-detail.png](references/picture-detail.png)                                |
+| `/shares/[publicId]`                | [通知、分享与评论](pages/notifications-sharing.md) | M6     | 已实现   | 产品图待补                                                                         |
 | `/spaces/personal`                  | [个人空间](pages/personal-space.md)                | M1/M7  | M1 已实现 | [personal-space.png](references/personal-space.png)                                |
 | `/upload`                           | [上传图片](pages/upload.md)                        | M1     | 已实现   | [upload.png](references/upload.png)                                                |
 | `/admin/reviews`                    | [管理员审核](pages/admin-reviews.md)               | M1     | 已实现   | [admin-reviews.png](references/admin-reviews.png)                                  |
@@ -45,7 +46,7 @@
 | `/ai/create`、`/ai/tasks`           | [AI 创作与任务](pages/ai.md)                       | M2     | 已实现开发闭环 | [ai-create.png](references/ai-create.png)、[ai-tasks.png](references/ai-tasks.png) |
 | `/editor/[pictureId]`               | [图片编辑器](pages/editor.md)                      | M3/M5  | M3 已实现，M5 规划 | [editor.png](references/editor.png)                                                |
 | `/spaces/team`、`/spaces/[spaceId]` | [团队空间](pages/team-space.md)                    | M4/M5  | 规划     | [team-space.png](references/team-space.png)                                        |
-| `/notifications`、分享与评论        | [通知、分享与评论](pages/notifications-sharing.md) | M4/M6  | 规划     | 产品图待补                                                                         |
+| `/notifications`、分享与评论        | [通知、分享与评论](pages/notifications-sharing.md) | M4/M6  | M6 互动已实现 | 产品图待补                                                                      |
 | `/spaces/[spaceId]/analytics`       | [空间分析](pages/analytics.md)                     | M7     | 规划     | 产品图待补                                                                         |
 
 ## 开发前检查

@@ -1,0 +1,400 @@
+openapi: 3.0.3
+info:
+  title: Teacup Picture M6 Sharing and Discussion API
+  version: 0.1.0
+  description: Controlled sharing, downloads, comments, mentions, and version-bound annotations.
+servers:
+  - url: /api/v1
+paths:
+  /pictures/{pictureId}/shares:
+    get:
+      summary: Get the active non-expired share
+      operationId: getActiveShare
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      responses:
+        '200': { $ref: '#/components/responses/ShareResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      summary: Create a share and return its fragment secret once
+      operationId: createShare
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateShareRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/ShareResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /pictures/{pictureId}/shares/regenerate:
+    post:
+      summary: Revoke the old share and create a replacement
+      operationId: regenerateShare
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateShareRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/ShareResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /pictures/{pictureId}/shares/{shareId}:
+    delete:
+      summary: Revoke a share
+      operationId: revokeShare
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PictureId' }
+        - { $ref: '#/components/parameters/ShareId' }
+      responses:
+        '200': { $ref: '#/components/responses/EmptyResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /public/shares/{publicId}/access:
+    post:
+      summary: Validate the fragment secret and optional password, then grant Session access
+      operationId: accessShare
+      parameters: [{ $ref: '#/components/parameters/PublicId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShareAccessRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/ShareAccessResponse' }
+        '401': { description: Password missing or incorrect; envelope code 40102 }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { description: Too many password attempts; envelope code 42900 }
+        '503': { description: Password validation dependency unavailable; envelope code 50300 }
+  /public/shares/{publicId}:
+    get:
+      summary: Get a Session-authorized shared picture
+      operationId: getSharedPicture
+      parameters: [{ $ref: '#/components/parameters/PublicId' }]
+      responses:
+        '200': { $ref: '#/components/responses/SharedPictureResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /public/shares/{publicId}/content:
+    get:
+      summary: Read the current shared picture asset after Session authorization
+      operationId: getSharedPictureContent
+      parameters: [{ $ref: '#/components/parameters/PublicId' }]
+      responses:
+        '200':
+          description: Image bytes with no-store and no-referrer headers
+          content: { 'image/*': { schema: { type: string, format: binary } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /public/shares/{publicId}/download:
+    get:
+      summary: Download the current shared picture; login is also required
+      operationId: downloadSharedPicture
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/PublicId' }]
+      responses:
+        '200': { $ref: '#/components/responses/BinaryDownload' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /pictures/{pictureId}/download:
+    get:
+      summary: Download a visible private or team picture
+      operationId: downloadPicture
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      responses:
+        '200': { $ref: '#/components/responses/BinaryDownload' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /public/pictures/{pictureId}/download:
+    get:
+      summary: Download an approved public picture; login is required
+      operationId: downloadPublicPicture
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      responses:
+        '200': { $ref: '#/components/responses/BinaryDownload' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /pictures/{pictureId}/publication:
+    delete:
+      summary: Withdraw an approved picture from the public gallery
+      operationId: withdrawPicturePublication
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      responses:
+        '200': { description: Updated M1 PictureDetail envelope }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /pictures/{pictureId}/comments:
+    get:
+      summary: List visible discussion threads
+      operationId: listPictureComments
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PictureId' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200': { $ref: '#/components/responses/CommentPageResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      summary: Create a comment or version-bound annotation
+      operationId: createPictureComment
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/PictureId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCommentRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/CommentResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { description: Comment rate limit; envelope code 42900 }
+        '503': { description: Comment rate-limit dependency unavailable; envelope code 50300 }
+  /public/pictures/{pictureId}/comments:
+    get:
+      summary: List discussions for an approved public picture
+      operationId: listPublicPictureComments
+      parameters:
+        - { $ref: '#/components/parameters/PictureId' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200': { $ref: '#/components/responses/CommentPageResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /public/shares/{publicId}/comments:
+    get:
+      summary: List discussions after share Session authorization
+      operationId: listSharedPictureComments
+      parameters:
+        - { $ref: '#/components/parameters/PublicId' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200': { $ref: '#/components/responses/CommentPageResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /pictures/{pictureId}/comment-mention-candidates:
+    get:
+      summary: List eligible structured mention candidates
+      operationId: listCommentMentionCandidates
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PictureId' }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 50 }
+      responses:
+        '200': { $ref: '#/components/responses/MentionCandidatesResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /comments/{rootId}/replies:
+    post:
+      summary: Reply inside a discussion thread
+      operationId: replyToComment
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/RootId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateReplyRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/CommentResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /comments/{rootId}:
+    patch:
+      summary: Resolve or reopen a discussion thread
+      operationId: updateCommentThread
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/RootId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolved]
+              properties: { resolved: { type: boolean } }
+      responses:
+        '200': { $ref: '#/components/responses/CommentResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /comments/{commentId}:
+    delete:
+      summary: Soft-delete a comment or reply
+      operationId: deleteComment
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CommentId' }]
+      responses:
+        '200': { $ref: '#/components/responses/EmptyResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    sessionCookie: { type: apiKey, in: cookie, name: TEACUP_SESSION }
+  parameters:
+    PictureId: { name: pictureId, in: path, required: true, schema: { type: string, pattern: '^[0-9]+$' } }
+    ShareId: { name: shareId, in: path, required: true, schema: { type: string, pattern: '^[0-9]+$' } }
+    PublicId: { name: publicId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    RootId: { name: rootId, in: path, required: true, schema: { type: string, pattern: '^[0-9]+$' } }
+    CommentId: { name: commentId, in: path, required: true, schema: { type: string, pattern: '^[0-9]+$' } }
+    Cursor: { name: cursor, in: query, schema: { type: string, pattern: '^[0-9]+$' } }
+  schemas:
+    CreateShareRequest:
+      type: object
+      properties:
+        expiresAt: { type: string, format: date-time, nullable: true, description: Between one minute and 365 days from creation }
+        password: { type: string, nullable: true, minLength: 4, maxLength: 72 }
+    Share:
+      type: object
+      required: [id, pictureId, publicId, passwordProtected, createdAt]
+      properties:
+        id: { type: string }
+        pictureId: { type: string }
+        publicId: { type: string }
+        sharePath: { type: string, nullable: true, description: Returned only when creating or regenerating }
+        passwordProtected: { type: boolean }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    ShareAccessRequest:
+      type: object
+      required: [secret]
+      properties:
+        secret: { type: string }
+        password: { type: string, nullable: true }
+    ShareAccessResult:
+      type: object
+      required: [granted, passwordProtected]
+      properties:
+        granted: { type: boolean }
+        passwordProtected: { type: boolean }
+        expiresAt: { type: string, format: date-time, nullable: true }
+    Author:
+      type: object
+      required: [name]
+      properties:
+        id: { type: string, nullable: true }
+        name: { type: string }
+        avatarUrl: { type: string, nullable: true }
+    SharedPicture:
+      type: object
+      required: [id, name, tags, width, height, author, imageUrl, currentVersionId, canDownload, canComment]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        introduction: { type: string, nullable: true }
+        category: { type: string, nullable: true }
+        tags: { type: array, items: { type: string } }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        author: { $ref: '#/components/schemas/Author' }
+        imageUrl: { type: string }
+        currentVersionId: { type: string }
+        canDownload: { type: boolean }
+        canComment: { type: boolean }
+    CreateCommentRequest:
+      type: object
+      required: [kind, body]
+      properties:
+        kind: { type: string, enum: [comment, annotation] }
+        body: { type: string, minLength: 1, maxLength: 2000 }
+        pictureVersionId: { type: string, nullable: true }
+        x: { type: number, minimum: 0, maximum: 1, nullable: true }
+        y: { type: number, minimum: 0, maximum: 1, nullable: true }
+        mentionedUserIds: { type: array, maxItems: 20, items: { type: string, pattern: '^[0-9]+$' } }
+    CreateReplyRequest:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 2000 }
+        replyToId: { type: string, nullable: true }
+        mentionedUserIds: { type: array, maxItems: 20, items: { type: string, pattern: '^[0-9]+$' } }
+    Comment:
+      type: object
+      required: [id, pictureId, kind, body, author, deleted, resolved, createdAt, updatedAt, replies, replyCount, canDelete, canResolve]
+      properties:
+        id: { type: string }
+        pictureId: { type: string }
+        pictureVersionId: { type: string, nullable: true }
+        kind: { type: string, enum: [comment, annotation, reply] }
+        body: { type: string }
+        x: { type: number, nullable: true, minimum: 0, maximum: 1 }
+        y: { type: number, nullable: true, minimum: 0, maximum: 1 }
+        author: { $ref: '#/components/schemas/Author' }
+        deleted: { type: boolean }
+        resolved: { type: boolean }
+        resolvedBy: { type: string, nullable: true }
+        resolvedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        replyToId: { type: string, nullable: true }
+        replies: { type: array, items: { $ref: '#/components/schemas/Comment' } }
+        replyCount: { type: integer, format: int64 }
+        canDelete: { type: boolean }
+        canResolve: { type: boolean }
+    CommentPage:
+      type: object
+      required: [items, hasMore, currentVersionId]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Comment' } }
+        nextCursor: { type: string, nullable: true }
+        hasMore: { type: boolean }
+        currentVersionId: { type: string }
+    MentionCandidate:
+      allOf: [{ $ref: '#/components/schemas/Author' }]
+    Envelope:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code: { type: integer }
+        data: { nullable: true }
+        message: { type: string }
+        requestId: { type: string }
+  responses:
+    ShareResponse:
+      description: Share envelope
+      content: { application/json: { schema: { allOf: [{ $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/Share' } } }] } } }
+    ShareAccessResponse:
+      description: Share access envelope with no-store headers
+      content: { application/json: { schema: { allOf: [{ $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/ShareAccessResult' } } }] } } }
+    SharedPictureResponse:
+      description: Shared picture envelope with no-store headers
+      content: { application/json: { schema: { allOf: [{ $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/SharedPicture' } } }] } } }
+    CommentResponse:
+      description: Comment envelope
+      content: { application/json: { schema: { allOf: [{ $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/Comment' } } }] } } }
+    CommentPageResponse:
+      description: Comment page envelope
+      content: { application/json: { schema: { allOf: [{ $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/CommentPage' } } }] } } }
+    MentionCandidatesResponse:
+      description: Mention candidates envelope
+      content: { application/json: { schema: { allOf: [{ $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/MentionCandidate' } } } }] } } }
+    EmptyResponse:
+      description: Successful empty envelope
+      content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } }
+    BinaryDownload:
+      description: Private MinIO-backed attachment
+      content: { application/octet-stream: { schema: { type: string, format: binary } } }
+    BadRequest: { description: Invalid parameters; envelope code 40000 }
+    Unauthenticated: { description: Missing or expired login; envelope code 40100 }
+    Forbidden: { description: Insufficient permission; envelope code 40101 }
+    NotFound: { description: Resource missing or intentionally hidden; envelope code 40400 }
+    Conflict: { description: State or picture version conflict; envelope code 40901 }

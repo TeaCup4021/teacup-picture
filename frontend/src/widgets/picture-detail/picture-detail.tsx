@@ -5,19 +5,30 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   EditOutlined,
+  DownloadOutlined,
+  ShareAltOutlined,
+  StopOutlined,
   SendOutlined,
 } from "@ant-design/icons";
-import { Alert, App, Button, Descriptions, Result, Skeleton, Space, Tag } from "antd";
+import { Alert, App, Button, Descriptions, Popconfirm, Result, Skeleton, Space, Tag, Tooltip } from "antd";
 import Link from "next/link";
+import { useState, type MouseEvent } from "react";
 import { usePrototypePicture, usePrototypeSession, useSubmitReview } from "@/features/prototype";
 import { PictureImage } from "@/features/prototype/ui/picture-image";
 import { PublishStatusTag } from "@/features/prototype/ui/publish-status-tag";
+import { interactionKeys, interactionsApi, normalizeAnnotationPosition, usePictureComments } from "@/features/interactions";
+import { CommentPanel } from "@/features/interactions/ui/comment-panel";
+import { ShareDialog } from "@/features/interactions/ui/share-dialog";
 
 export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
   const { message } = App.useApp();
   const picture = usePrototypePicture(pictureId);
   const session = usePrototypeSession();
   const submitReview = useSubmitReview();
+  const comments = usePictureComments(pictureId, Boolean(session.data));
+  const [shareOpen, setShareOpen] = useState(false);
+  const [selectingAnchor, setSelectingAnchor] = useState(false);
+  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
 
   if (picture.isLoading) {
     return (
@@ -36,6 +47,7 @@ export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
   const item = picture.data;
   const isOwner = session.data?.id === item.authorId;
   const canEdit = isOwner || session.data?.role === "admin";
+  const canShare = Boolean(session.data && item.permissions.includes("picture:share"));
   const canSubmit =
     isOwner && (item.publishStatus === "not_requested" || item.publishStatus === "rejected");
 
@@ -46,6 +58,16 @@ export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
     });
   };
 
+  const placeAnchor = (event: MouseEvent<HTMLDivElement>) => {
+    if (!selectingAnchor) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const border = Number.parseFloat(getComputedStyle(event.currentTarget).borderLeftWidth) || 0;
+    setAnchor(normalizeAnnotationPosition(event.clientX, event.clientY, { left: rect.left, top: rect.top, width: rect.width, height: rect.height, border }));
+    setSelectingAnchor(false);
+  };
+
+  const currentAnnotations = (comments.data?.items ?? []).filter((comment) => comment.kind === "annotation" && !comment.deleted && comment.pictureVersionId === item.currentVersionId && comment.x != null && comment.y != null);
+
   return (
     <main className="content-shell detail-shell">
       <div className="detail-back-row">
@@ -55,8 +77,10 @@ export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
       </div>
       <div className="detail-layout">
         <section className="detail-media" aria-label={item.title}>
-          <div style={{ aspectRatio: `${item.width} / ${item.height}` }}>
+          <div className={selectingAnchor ? "detail-image-frame is-placing-annotation" : "detail-image-frame"} style={{ aspectRatio: `${item.width} / ${item.height}` }} onClick={placeAnchor}>
             <PictureImage alt={item.title} priority src={item.imageUrl} />
+            {currentAnnotations.map((comment, index) => <Tooltip title={comment.body} key={comment.id}><button className={comment.resolved ? "annotation-pin is-resolved" : "annotation-pin"} style={{ left: `${comment.x! * 100}%`, top: `${comment.y! * 100}%` }} aria-label={`批注 ${index + 1}`}>{index + 1}</button></Tooltip>)}
+            {anchor ? <span className="annotation-pin is-pending" style={{ left: `${anchor.x * 100}%`, top: `${anchor.y * 100}%` }} aria-label="待提交批注位置">+</span> : null}
           </div>
         </section>
         <aside className="detail-panel">
@@ -91,6 +115,11 @@ export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
               {new Date(item.createdAt).toLocaleDateString("zh-CN")}
             </Descriptions.Item>
           </Descriptions>
+          <div className="detail-interaction-actions">
+            {session.data ? <Button icon={<DownloadOutlined />} onClick={() => interactionsApi.downloadPicture(item.id, item.visibility === "public", item.title).catch((error: Error) => void message.error(error.message))}>下载</Button> : <Button icon={<DownloadOutlined />} href="/login">登录后下载</Button>}
+            {canShare ? <Button icon={<ShareAltOutlined />} onClick={() => setShareOpen(true)}>分享</Button> : null}
+            {canShare && item.publishStatus === "approved" ? <Popconfirm title="撤回后图片将立即离开公开图库" onConfirm={() => interactionsApi.withdrawPublication(item.id).then(() => { void message.success("已撤回公开状态"); void picture.refetch(); }).catch((error: Error) => void message.error(error.message))}><Button danger icon={<StopOutlined />}>撤回公开</Button></Popconfirm> : null}
+          </div>
           {item.publishStatus === "pending" && isOwner ? (
             <Alert
               type="warning"
@@ -138,6 +167,8 @@ export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
           ) : null}
         </aside>
       </div>
+      <CommentPanel pictureId={item.id} currentVersionId={item.currentVersionId ?? comments.data?.currentVersionId ?? undefined} comments={comments.data} loading={comments.isLoading} error={comments.isError} authenticated={Boolean(session.data)} refreshKey={interactionKeys.comments(item.id, session.data ? "private" : "public")} pendingAnchor={anchor} onRequestAnchor={() => setSelectingAnchor(true)} onClearAnchor={() => { setAnchor(null); setSelectingAnchor(false); }} onLoadMore={() => void comments.fetchNextPage()} loadingMore={comments.isFetchingNextPage} />
+      {canShare ? <ShareDialog open={shareOpen} pictureId={item.id} onClose={() => setShareOpen(false)} /> : null}
     </main>
   );
 }

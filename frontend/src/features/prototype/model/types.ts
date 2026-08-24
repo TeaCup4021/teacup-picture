@@ -28,6 +28,9 @@ export interface PrototypePicture {
   publishStatus: PublishStatus;
   reviewNote?: string;
   reviewRequestId?: string;
+  currentVersionId?: string;
+  permissions: string[];
+  visibility: "private" | "public";
 }
 
 export interface PrototypeDatabase {

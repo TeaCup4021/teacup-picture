@@ -3,7 +3,7 @@
 import { CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import { Button, Space, Tooltip } from "antd";
 import { Canvas, Path, PencilBrush, Rect, Textbox } from "fabric";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { normalizeCrop, normalizeEditorDocument } from "@/features/editor/model/document";
 import { calculateEditorPreviewScale } from "@/features/editor/model/preview";
 import { renderAdjustedImage } from "@/features/editor/model/render";
@@ -91,7 +91,7 @@ export function EditorCanvas({
   const [draftCrop, setDraftCrop] = useState<CropRect | null>(null);
   const [eraserCursor, setEraserCursor] = useState<{ x: number; y: number } | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onDocumentChangeRef.current = onDocumentChange;
     onSelectLayerRef.current = onSelectLayer;
     documentRef.current = document;
@@ -290,16 +290,16 @@ export function EditorCanvas({
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
     const previous = renderStateRef.current;
     const active = canvas.getActiveObject();
-    if (interactionActiveRef.current) return;
     if (active instanceof Textbox && active.isEditing && previous && previous.tool !== tool) {
       active.exitEditing();
       return;
     }
+    if (interactionActiveRef.current) return;
     renderStateRef.current = { document, image, tool };
 
     if (isAdjustmentOnlyUpdate(previous, document, image, tool)) {

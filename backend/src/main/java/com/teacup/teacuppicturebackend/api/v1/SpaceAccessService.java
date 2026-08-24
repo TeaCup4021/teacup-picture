@@ -66,7 +66,7 @@ public class SpaceAccessService {
     public List<String> permissions(User user, Space space) {
         String role = roleOf(user, space);
         if (role == null) return List.of();
-        if (OWNER.equals(role) || ADMIN.equals(role)) return List.of("picture:view", "picture:upload", "picture:edit", "picture:delete", "picture:publish", "space:manage", "space:members");
+        if (OWNER.equals(role) || ADMIN.equals(role)) return List.of("picture:view", "picture:upload", "picture:edit", "picture:delete", "picture:publish", "picture:share", "space:manage", "space:members");
         if (EDITOR.equals(role)) return List.of("picture:view", "picture:upload", "picture:edit", "picture:delete", "picture:publish");
         return List.of("picture:view");
     }

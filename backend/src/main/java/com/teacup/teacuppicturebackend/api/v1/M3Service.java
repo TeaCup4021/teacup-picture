@@ -236,6 +236,7 @@ public class M3Service {
         ensureReplacementCapacity(space, sizeDelta);
         applyVersionToPicture(picture, source);
         resetPublication(picture);
+        picture.setCurrentVersionId(restored.getId());
         pictureMapper.updateById(picture);
         updateSpaceSize(space.getId(), sizeDelta);
         clearDraft(pictureId);
@@ -266,11 +267,12 @@ public class M3Service {
                     picture.getThumbnailObjectKey(), picture.getContentType(), valueOrOne(picture.getPicWidth()),
                     valueOrOne(picture.getPicHeight()), nz(picture.getPicSize()), user.getId());
         }
-        insertVersionSnapshot(picture.getId(), nextVersion, "保存结果", "替换当前图片",
+        PictureVersion saved = insertVersionSnapshot(picture.getId(), nextVersion, "保存结果", "替换当前图片",
                 "user_save", null, emptyEditorStateJson(stored.width(), stored.height()), stored.objectKey(),
                 stored.thumbnailObjectKey(), stored.contentType(), stored.width(), stored.height(),
                 stored.size(), user.getId());
         applyStoredPicture(picture, stored);
+        picture.setCurrentVersionId(saved.getId());
         resetPublication(picture);
         pictureMapper.updateById(picture);
         updateSpaceSize(space.getId(), sizeDelta);
@@ -299,6 +301,11 @@ public class M3Service {
         copy.setReviewStatus(0);
         copy.setIsDelete(0);
         pictureMapper.insert(copy);
+        PictureVersion initial = insertVersionSnapshot(copy.getId(), 1, "原始图片", "另存图片时自动保存",
+                "user_save", null, emptyEditorStateJson(stored.width(), stored.height()), stored.objectKey(),
+                stored.thumbnailObjectKey(), stored.contentType(), stored.width(), stored.height(), stored.size(), user.getId());
+        copy.setCurrentVersionId(initial.getId());
+        pictureMapper.updateById(copy);
         spaceMapper.update(null, new UpdateWrapper<Space>()
                 .eq("id", space.getId())
                 .setSql("totalSize = totalSize + " + stored.size())
@@ -306,7 +313,7 @@ public class M3Service {
         return copy;
     }
 
-    private void insertVersionSnapshot(long pictureId, int versionNumber, String name, String note,
+    private PictureVersion insertVersionSnapshot(long pictureId, int versionNumber, String name, String note,
                                        String sourceType, Long parentVersionId, String editorState,
                                        String objectKey, String thumbnailObjectKey, String contentType,
                                        int width, int height, long size, long creatorId) {
@@ -327,6 +334,7 @@ public class M3Service {
         version.setSize(size);
         version.setCreatorId(creatorId);
         versionMapper.insert(version);
+        return version;
     }
 
     private void applyStoredPicture(Picture picture, PictureStorage.StoredPicture stored) {

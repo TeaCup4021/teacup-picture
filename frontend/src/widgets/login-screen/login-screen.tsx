@@ -4,27 +4,36 @@ import { LockOutlined, UserOutlined } from "@ant-design/icons";
 import { Alert, Button, Form, Input } from "antd";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import Link from "next/link";
+import { restoreShareLoginContinuation } from "@/features/interactions/share-login-continuation";
 import { usePrototypeLogin, usePrototypeSession } from "@/features/prototype";
 import type { LoginInput } from "@/features/prototype";
 
-export function LoginScreen() {
+export function LoginScreen({ returnTo = null }: { returnTo?: string | null }) {
   const [form] = Form.useForm<LoginInput>();
   const router = useRouter();
   const session = usePrototypeSession();
   const login = usePrototypeLogin();
-
+  const destination = useCallback(
+    (role: "user" | "admin") =>
+      returnTo
+        ? restoreShareLoginContinuation(returnTo)
+        : role === "admin"
+          ? "/admin/reviews"
+          : "/spaces/personal",
+    [returnTo],
+  );
   useEffect(() => {
     if (session.data) {
-      router.replace(session.data.role === "admin" ? "/admin/reviews" : "/spaces/personal");
+      router.replace(destination(session.data.role));
     }
-  }, [router, session.data]);
+  }, [destination, router, session.data]);
 
   const handleSubmit = (values: LoginInput) => {
     login.mutate(values, {
       onSuccess: (user) => {
-        router.replace(user.role === "admin" ? "/admin/reviews" : "/spaces/personal");
+        router.replace(destination(user.role));
       },
     });
   };

@@ -21,6 +21,15 @@ public class V1Exception extends RuntimeException {
     public static V1Exception unauthorized() {
         return new V1Exception(HttpStatus.UNAUTHORIZED, 40100, "未登录或会话已失效");
     }
+    public static V1Exception passwordRequired() {
+        return new V1Exception(HttpStatus.UNAUTHORIZED, 40102, "分享访问密码错误或缺失");
+    }
+    public static V1Exception tooManyRequests(String message) {
+        return new V1Exception(HttpStatus.TOO_MANY_REQUESTS, 42900, message);
+    }
+    public static V1Exception serviceUnavailable(String message) {
+        return new V1Exception(HttpStatus.SERVICE_UNAVAILABLE, 50300, message);
+    }
     public static V1Exception forbidden() {
         return new V1Exception(HttpStatus.FORBIDDEN, 40101, "无权限执行此操作");
     }

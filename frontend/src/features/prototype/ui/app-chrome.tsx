@@ -113,13 +113,13 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
                 key={item.href}
               >
                 {item.icon}
-                <span>{item.label}</span>
+                <span className="sidebar-label">{item.label}</span>
               </Link>
             ))}
             {!isAdmin && session.data?.role === "admin" ? (
               <Link className="sidebar-link" href="/admin/reviews">
                 <AuditOutlined />
-                <span>审核管理</span>
+                <span className="sidebar-label">审核管理</span>
               </Link>
             ) : null}
           </nav>
@@ -168,7 +168,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
                 key={item.href}
               >
                 {item.icon}
-                <span>{item.label}</span>
+                <span className="nav-label">{item.label}</span>
               </Link>
             ))}
           </nav>
