@@ -44,6 +44,7 @@ export const interactionsApi = {
   comments: (pictureId: string, authenticated: boolean, cursor?: string) => request<CommentPage>("get", `${authenticated ? "" : "/public"}/pictures/${pictureId}/comments${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
   mentionCandidates: (pictureId: string, query = "") => request<MentionCandidate[]>("get", `/pictures/${pictureId}/comment-mention-candidates${query ? `?q=${encodeURIComponent(query)}` : ""}`),
   shareComments: (publicId: string, cursor?: string) => request<CommentPage>("get", `/public/shares/${publicId}/comments${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
+  commentThread: (rootId: string) => request<CommentItem>("get", `/comments/${rootId}`),
   createComment: (input: CommentInput) => request<CommentItem>("post", `/pictures/${input.pictureId}/comments`, {
     kind: input.kind, body: input.body, pictureVersionId: input.pictureVersionId ?? null,
     x: input.x ?? null, y: input.y ?? null, mentionedUserIds: input.mentionedUserIds ?? [],

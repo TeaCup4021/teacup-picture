@@ -117,6 +117,17 @@ select {
   gap: 10px;
 }
 
+.notification-bell {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  color: var(--app-muted);
+}
+
+.notification-bell .anticon {
+  font-size: 17px;
+}
+
 .account-button {
   gap: 8px;
   min-width: 0;
@@ -411,6 +422,122 @@ select {
 .notifications-shell {
   display: grid;
   gap: 24px;
+}
+
+.notification-popover {
+  display: grid;
+  width: min(360px, calc(100vw - 40px));
+  max-height: min(560px, calc(100vh - 96px));
+  overflow: hidden;
+}
+
+.notification-popover-heading,
+.notification-popover-footer,
+.notification-entry-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notification-popover-heading {
+  padding: 4px 4px 12px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.notification-popover-heading > span {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.notification-popover-list {
+  min-height: 96px;
+  overflow-y: auto;
+}
+
+.notification-popover-list > .ant-spin,
+.notification-popover-list > .ant-empty,
+.notification-popover-list > .ant-alert {
+  margin: 24px auto;
+}
+
+.notification-popover-footer {
+  justify-content: center;
+  padding: 12px 4px 2px;
+  border-top: 1px solid var(--app-border);
+  color: var(--app-accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.notification-list {
+  display: grid;
+  margin-top: 10px;
+  border-top: 1px solid var(--app-border);
+}
+
+.notification-entry {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 16px 12px;
+  border-bottom: 1px solid var(--app-border);
+  color: var(--app-text);
+  transition: background var(--ui-motion-fast);
+}
+
+.notification-entry.is-compact {
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 4px;
+}
+
+.notification-entry:hover,
+.notification-entry:focus-visible,
+.notification-entry.is-unread {
+  background: #f1f6ff;
+}
+
+.notification-entry-content {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.notification-entry-heading {
+  align-items: flex-start;
+}
+
+.notification-entry-heading strong,
+.notification-entry-content > span {
+  overflow-wrap: anywhere;
+}
+
+.notification-entry-heading strong {
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.notification-entry-heading i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--app-accent);
+}
+
+.notification-entry-content > span:not(.notification-entry-heading) {
+  color: var(--app-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.notification-entry-content small {
+  color: #8b96a8;
+  font-size: 12px;
 }
 
 .notification-section {
@@ -826,6 +953,17 @@ select {
   pointer-events: none;
 }
 
+.annotation-pin.is-notification-focus {
+  animation: annotation-notification-focus 1.2s ease-in-out 2;
+}
+
+@keyframes annotation-notification-focus {
+  50% {
+    box-shadow: 0 0 0 8px rgb(51 112 255 / 22%);
+    transform: translate(-50%, -50%) scale(1.16);
+  }
+}
+
 .detail-interaction-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -887,6 +1025,26 @@ select {
 .comment-thread-list .comment-thread {
   align-items: stretch;
   padding: 20px 0;
+}
+
+.comment-thread.is-notification-focus,
+.comment-reply-entry.is-notification-focus {
+  border-radius: 6px;
+  scroll-margin-top: calc(var(--ui-header-height) + 16px);
+  animation: notification-focus 3s ease-out;
+}
+
+@keyframes notification-focus {
+  0%,
+  28% {
+    background: #e8f1ff;
+    box-shadow: 0 0 0 3px rgb(51 112 255 / 28%);
+  }
+
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 0 rgb(51 112 255 / 0%);
+  }
 }
 
 .comment-thread.is-resolved {
@@ -2213,6 +2371,12 @@ select {
 .editor-header-actions .ant-btn-primary {
   border-color: #3370ff;
   background: #3370ff;
+}
+
+.editor-header-actions .notification-bell.is-inverse {
+  border-color: #34415a;
+  background: #1b2333;
+  color: #dbe4f2;
 }
 
 .editor-body {

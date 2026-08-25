@@ -152,6 +152,35 @@ test("M6 completes protected sharing, login continuation, comments, and annotati
   expect(commentPayload.mentionedUserIds).toHaveLength(1);
   await expect(viewerPage.getByText(viewerComment, { exact: true })).toBeVisible();
 
+  await ownerPage.bringToFront();
+  await ownerPage.getByRole("button", { name: /通知中心/ }).click();
+  const pictureCommentNotification = ownerPage.locator(".notification-entry").filter({ hasText: "评论了你的图片" }).first();
+  await expect(pictureCommentNotification).toContainText(viewerComment);
+  await pictureCommentNotification.click();
+  await expect(ownerPage).toHaveURL(/\/pictures\/\d+\?thread=\d+&comment=\d+$/);
+  const focusedOwnerThread = ownerPage.locator(".comment-thread.is-notification-focus");
+  await expect(focusedOwnerThread).toContainText(viewerComment);
+
+  const ownerReply = `所有者回复访问者 ${suffix}`;
+  await focusedOwnerThread.getByRole("button", { name: "回复", exact: true }).click();
+  await focusedOwnerThread.getByLabel("回复内容").fill(ownerReply);
+  const ownerReplyResponsePromise = ownerPage.waitForResponse(
+    (response) => response.request().method() === "POST" && /\/comments\/\d+\/replies$/.test(response.url()),
+  );
+  await focusedOwnerThread.locator(".reply-composer").getByRole("button", { name: /回\s*复/ }).click();
+  expect((await ownerReplyResponsePromise).status()).toBe(201);
+  await expect(focusedOwnerThread.getByText(ownerReply, { exact: true })).toBeVisible();
+
+  await viewerPage.bringToFront();
+  await viewerPage.getByRole("button", { name: /通知中心/ }).click();
+  const replyNotification = viewerPage.locator(".notification-entry").filter({ hasText: "回复了你的评论" }).first();
+  await expect(replyNotification).toContainText(ownerReply);
+  await replyNotification.click();
+  await expect(viewerPage).toHaveURL(/\/shares\/[A-Za-z0-9_-]+\?thread=\d+&comment=\d+$/);
+  expect(viewerPage.url()).not.toContain("#");
+  const focusedReply = viewerPage.locator(".comment-reply-entry.is-notification-focus");
+  await expect(focusedReply).toContainText(ownerReply);
+
   const viewerThread = viewerPage.locator(".comment-thread").filter({ hasText: viewerComment });
   await expect(viewerThread.getByRole("button", { name: "解决" })).toBeVisible();
   await expect(viewerThread.getByRole("button", { name: "删除评论" })).toBeVisible();
@@ -253,6 +282,16 @@ test("M6 completes protected sharing, login continuation, comments, and annotati
     await expect(viewerPage.locator(".ant-message-notice")).toHaveCount(0, { timeout: 5_000 });
     await expect(ownerPage.getByRole("heading", { name: pictureName })).toBeVisible();
     await expect(viewerPage.getByRole("heading", { name: pictureName })).toBeVisible();
+    const notificationBell = ownerPage.getByRole("button", { name: /通知中心/ });
+    await notificationBell.click();
+    const notificationPopover = ownerPage.locator(".notification-popover");
+    await expect(notificationPopover).toBeVisible();
+    const popoverBounds = await notificationPopover.boundingBox();
+    expect(popoverBounds).not.toBeNull();
+    expect(popoverBounds!.x).toBeGreaterThanOrEqual(0);
+    expect(popoverBounds!.x + popoverBounds!.width).toBeLessThanOrEqual(viewport.width);
+    await notificationBell.click();
+    await expect(notificationPopover).toBeHidden();
     await expectStableResponsiveLayout(ownerPage);
     await expectStableResponsiveLayout(viewerPage);
     expect(await ownerPage.locator("main img").first().evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);

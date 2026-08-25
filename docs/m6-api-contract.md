@@ -49,7 +49,7 @@ GET /api/v1/public/shares/{publicId}/content
 GET /api/v1/public/shares/{publicId}/download
 ```
 
-内容允许获得分享授权的匿名 Session 查看；下载额外要求登录。登录续办只把不含 fragment 的站内分享路径放入 `returnTo`，片段密钥暂存在当前标签页 `sessionStorage`，登录成功后在浏览器内恢复并立即清理续办记录。原始密钥只进入专用 access 校验请求体，不进入登录页请求、`returnTo`、访问日志或数据库。
+内容允许获得分享授权的匿名 Session 查看；下载额外要求登录。登录续办只把不含 fragment 的站内分享路径放入 `returnTo`，片段密钥暂存在当前标签页 `sessionStorage`，登录成功后在浏览器内恢复并立即清理续办记录。原始密钥只进入专用 access 校验请求体，不进入登录页请求、`returnTo`、访问日志或数据库。已持有有效分享 Session 授权的浏览器可通过不含 fragment 的站内通知深链恢复分享页；该行为不创建新授权。
 
 ## 评论与批注
 
@@ -59,12 +59,13 @@ GET    /api/v1/public/pictures/{pictureId}/comments
 GET    /api/v1/public/shares/{publicId}/comments
 POST   /api/v1/pictures/{pictureId}/comments
 POST   /api/v1/comments/{rootId}/replies
+GET    /api/v1/comments/{rootId}
 PATCH  /api/v1/comments/{rootId}
 DELETE /api/v1/comments/{commentId}
 GET    /api/v1/pictures/{pictureId}/comment-mention-candidates
 ```
 
-根讨论按倒序 ID 游标分页，每页 20 条；回复按时间升序返回，单次最多 100 条。回复接口路径中的 `rootId` 标识讨论串，请求体中的 `replyToId` 可指向根评论或该讨论串内的任意回复。删除采用软删除并清空正文，同时删除提及关系。评论频率由 Redis 按用户和 IP 限制为每分钟 20 次。
+根讨论按倒序 ID 游标分页，每页 20 条；回复按时间升序返回，单次最多 100 条。回复接口路径中的 `rootId` 标识讨论串，请求体中的 `replyToId` 可指向根评论或该讨论串内的任意回复。登录用户可按 `rootId` 单独读取一个有权限查看的完整讨论串，供通知深链定位较早评论。删除采用软删除并清空正文，同时删除提及关系。评论频率由 Redis 按用户和 IP 限制为每分钟 20 次。
 
 普通评论不携带版本和坐标。位置批注请求示例：
 
@@ -79,7 +80,7 @@ GET    /api/v1/pictures/{pictureId}/comment-mention-candidates
 }
 ```
 
-提及候选只包含图片所有者、团队成员和已有讨论参与者，并排除当前用户。前端提交结构化用户 ID，不从正文昵称推断身份。回复、提及、解决和重新打开复用 M4 `notification` 表写入站内通知。
+提及候选只包含图片所有者、团队成员和已有讨论参与者，并排除当前用户。前端提交结构化用户 ID，不从正文昵称推断身份。新增评论、回复、提及、解决和重新打开复用 M4 `notification` 表写入站内通知；互动通知 payload 携带 `pictureId`、`rootId`、`commentId`、讨论类型和正文摘要，用于生成受校验的站内深链。仅能通过分享查看图片的接收人还会得到非敏感的 `sharePublicId`，片段密钥不会进入通知。
 
 ## 图片下载与公开撤回
 

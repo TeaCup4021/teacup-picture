@@ -4,7 +4,6 @@ import {
   AppstoreOutlined,
   BgColorsOutlined,
   AuditOutlined,
-  BellOutlined,
   DownOutlined,
   HomeOutlined,
   LogoutOutlined,
@@ -13,12 +12,12 @@ import {
   UploadOutlined,
   UserOutlined,
 } from "@ant-design/icons";
-import { Avatar, Badge, Button, Dropdown, Skeleton, Tooltip } from "antd";
+import { Avatar, Button, Dropdown, Skeleton } from "antd";
 import type { MenuProps } from "antd";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { usePrototypeLogout, usePrototypeSession } from "@/features/prototype";
-import { useNotifications } from "@/features/team";
+import { NotificationBell } from "@/features/team";
 
 const publicNavigation = [
   { href: "/", label: "发现", icon: <PictureOutlined /> },
@@ -39,7 +38,6 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
   const router = useRouter();
   const session = usePrototypeSession();
   const logout = usePrototypeLogout();
-  const notifications = useNotifications(Boolean(session.data));
   if (pathname === "/login" || pathname === "/register") return children;
   if (pathname.startsWith("/editor/")) return children;
 
@@ -144,7 +142,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
                       ? "AI 创作 / 任务中心"
                     : "个人空间 / 空间概览"}
             </span>
-            {!isAdmin ? <Tooltip title="通知中心"><Button type="text" aria-label="通知中心" icon={<Badge count={notifications.data?.unreadCount ?? 0} size="small"><BellOutlined /></Badge>} href="/notifications" /></Tooltip> : null}
+            <NotificationBell enabled={Boolean(session.data)} />
           </header>
           <div className="workspace-page">{children}</div>
         </div>
@@ -173,6 +171,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
             ))}
           </nav>
           <div className="header-account">
+            <NotificationBell enabled={Boolean(session.data)} />
             {session.data ? (
               <Button type="primary" href="/upload" icon={<UploadOutlined />}>
                 上传图片

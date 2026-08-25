@@ -108,11 +108,11 @@ public class M6Service {
 
     public M6Dtos.ShareAccessResult grantShare(String publicId, M6Dtos.ShareAccessRequest input, HttpServletRequest request) {
         PictureShare share = requireActiveShare(publicId);
-        String secret = input == null ? null : input.secret();
-        if (secret == null || !constantEquals(share.getSecretHash(), sha256(secret))) throw V1Exception.notFound();
         if (hasGrant(request.getSession(false), share)) {
             return new M6Dtos.ShareAccessResult(true, share.getPasswordHash() != null, instant(share.getExpiresAt()));
         }
+        String secret = input == null ? null : input.secret();
+        if (secret == null || !constantEquals(share.getSecretHash(), sha256(secret))) throw V1Exception.notFound();
         if (share.getPasswordHash() != null) {
             String key = "m6:share-password:" + publicId + ":" + request.getRemoteAddr();
             try {
@@ -189,6 +189,14 @@ public class M6Service {
         return commentPage(viewer, requirePicture(share.getPictureId()), cursor);
     }
 
+    public M6Dtos.CommentView commentThread(User viewer, long rootId, HttpServletRequest request) {
+        PictureComment root = requireRoot(rootId);
+        Picture picture = requirePicture(root.getPictureId());
+        if (!canView(viewer, picture, request)) throw V1Exception.notFound();
+        List<PictureComment> replyRows = completeReplies(rootId);
+        return view(root, viewer, picture, replyRows, replyRows.size());
+    }
+
     public List<M6Dtos.MentionCandidate> mentionCandidates(User viewer, long pictureId, String query,
                                                             HttpServletRequest request) {
         Picture picture = requirePicture(pictureId);
@@ -240,9 +248,13 @@ public class M6Service {
             row.setPositionX(coordinate(input.x())); row.setPositionY(coordinate(input.y()));
         }
         comments.insert(row);
-        saveMentions(user, picture, row, input.mentionedUserIds());
-        if (!Objects.equals(picture.getUserId(), user.getId())) notifyUser(picture.getUserId(),
-                "picture_comment_created", user.getId(), "picture_comment", row.getId(), Map.of("pictureId", id(pictureId), "pictureName", picture.getName()));
+        Set<Long> notified = new HashSet<>();
+        if (!Objects.equals(picture.getUserId(), user.getId())) {
+            notifyUser(picture.getUserId(), "picture_comment_created", user.getId(), "picture_comment", row.getId(),
+                    discussionPayload(picture, row, kind, picture.getUserId()));
+            notified.add(picture.getUserId());
+        }
+        saveMentions(user, picture, row, input.mentionedUserIds(), notified);
         return view(row, user, picture, List.of(), 0);
     }
 
@@ -261,7 +273,7 @@ public class M6Service {
         comments.insert(row);
         Set<Long> notified = new HashSet<>();
         if (!Objects.equals(replyTo.getAuthorId(), user.getId())) {
-            notifyUser(replyTo.getAuthorId(), "picture_comment_reply", user.getId(), "picture_comment", row.getId(), Map.of("pictureId", id(picture.getId()), "rootId", id(rootId), "pictureName", picture.getName()));
+            notifyUser(replyTo.getAuthorId(), "picture_comment_reply", user.getId(), "picture_comment", row.getId(), discussionPayload(picture, row, root.getKind(), replyTo.getAuthorId()));
             notified.add(replyTo.getAuthorId());
         }
         saveMentions(user, picture, row, input.mentionedUserIds(), notified);
@@ -282,7 +294,7 @@ public class M6Service {
         root.setResolvedAt(resolvedAt); root.setResolvedBy(resolvedBy);
         if (!Objects.equals(root.getAuthorId(), user.getId())) notifyUser(root.getAuthorId(),
                 resolved ? "picture_annotation_resolved" : "picture_annotation_reopened", user.getId(),
-                "picture_comment", root.getId(), Map.of("pictureId", id(picture.getId()), "pictureName", picture.getName()));
+                "picture_comment", root.getId(), discussionPayload(picture, root, root.getKind(), root.getAuthorId()));
         return view(root, user, picture, replies(root.getId()), replyCount(root.getId()));
     }
 
@@ -312,6 +324,11 @@ public class M6Service {
                 .orderByAsc(PictureComment::getId).last("LIMIT " + MAX_REPLIES));
     }
 
+    private List<PictureComment> completeReplies(long rootId) {
+        return comments.selectList(new LambdaQueryWrapper<PictureComment>().eq(PictureComment::getRootId, rootId)
+                .orderByAsc(PictureComment::getId));
+    }
+
     private long replyCount(long rootId) { return comments.selectCount(new LambdaQueryWrapper<PictureComment>().eq(PictureComment::getRootId, rootId)); }
 
     private M6Dtos.CommentView view(PictureComment row, User viewer, Picture picture, List<PictureComment> replyRows, long replyCount) {
@@ -333,8 +350,31 @@ public class M6Service {
             if (Objects.equals(userId, actor.getId())) continue;
             if (!canMention(userId, picture, comment)) throw V1Exception.badRequest("被提及用户不在当前讨论范围内");
             CommentMention mention = new CommentMention(); mention.setCommentId(comment.getId()); mention.setUserId(userId); mentions.insert(mention);
-            if (alreadyNotified.add(userId)) notifyUser(userId, "picture_comment_mention", actor.getId(), "picture_comment", comment.getId(), Map.of("pictureId", id(picture.getId()), "pictureName", picture.getName()));
+            if (alreadyNotified.add(userId)) notifyUser(userId, "picture_comment_mention", actor.getId(), "picture_comment", comment.getId(), discussionPayload(picture, comment, threadKind(comment), userId));
         }
+    }
+
+    private String threadKind(PictureComment comment) {
+        if (!"reply".equals(comment.getKind()) || comment.getRootId() == null) return comment.getKind();
+        PictureComment root = comments.selectById(comment.getRootId());
+        return root == null ? "comment" : root.getKind();
+    }
+
+    private Map<String, Object> discussionPayload(Picture picture, PictureComment comment, String threadKind, long recipientId) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("pictureId", id(picture.getId()));
+        payload.put("pictureName", picture.getName());
+        payload.put("rootId", id(comment.getRootId() == null ? comment.getId() : comment.getRootId()));
+        payload.put("commentId", id(comment.getId()));
+        payload.put("kind", threadKind);
+        payload.put("excerpt", excerpt(comment.getBody()));
+        User recipient = users.selectById(recipientId);
+        if (!canView(recipient, picture, null)) {
+            PictureShare share = shares.selectOne(new LambdaQueryWrapper<PictureShare>()
+                    .eq(PictureShare::getPictureId, picture.getId()).isNull(PictureShare::getRevokedAt).last("LIMIT 1"));
+            if (share != null && !isExpired(share)) payload.put("sharePublicId", share.getPublicId());
+        }
+        return payload;
     }
 
     private boolean canMention(long userId, Picture picture, PictureComment comment) {
@@ -428,6 +468,7 @@ public class M6Service {
     private static String sha256(String value) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); } catch (Exception e) { throw new IllegalStateException(e); } }
     private static boolean constantEquals(String a, String b) { return a != null && b != null && MessageDigest.isEqual(a.getBytes(StandardCharsets.US_ASCII), b.getBytes(StandardCharsets.US_ASCII)); }
     private static String body(String value) { String body = value == null ? "" : value.trim(); if (body.isEmpty() || body.length() > 2000) throw V1Exception.badRequest("评论长度必须为 1 到 2000 字"); return body; }
+    private static String excerpt(String value) { String text = value == null ? "" : value.trim().replaceAll("\\s+", " "); return text.length() <= 120 ? text : text.substring(0, 120) + "..."; }
     private static BigDecimal coordinate(Double value) { if (value == null || !Double.isFinite(value) || value < 0 || value > 1) throw V1Exception.badRequest("批注坐标无效"); return BigDecimal.valueOf(value).setScale(8, RoundingMode.HALF_UP); }
     private static Double decimal(BigDecimal value) { return value == null ? null : value.doubleValue(); }
     private long parseId(String value) { try { long id = Long.parseLong(value); if (id <= 0) throw new NumberFormatException(); return id; } catch (RuntimeException e) { throw V1Exception.badRequest("ID 格式无效"); } }

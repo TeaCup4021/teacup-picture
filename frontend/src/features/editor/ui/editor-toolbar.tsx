@@ -21,6 +21,7 @@ import {
 import { Button, Space, Tooltip } from "antd";
 import type { ReactNode } from "react";
 import type { EditorTool } from "@/features/editor/model/types";
+import { NotificationBell } from "@/features/team";
 
 interface EditorToolbarProps {
   zoom: number;
@@ -207,6 +208,7 @@ export function EditorToolbar({
             保存
           </Button>
         </Tooltip>
+        <NotificationBell inverse />
       </Space>
     </div>
   );

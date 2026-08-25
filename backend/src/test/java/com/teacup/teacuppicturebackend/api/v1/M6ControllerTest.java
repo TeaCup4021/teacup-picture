@@ -15,6 +15,7 @@ import java.time.Instant;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -101,5 +102,44 @@ class M6ControllerTest {
         mockMvc.perform(get("/api/v1/public/shares/public-id/download"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(40100));
+    }
+
+    @Test
+    void focusedCommentThreadRequiresAuthentication() throws Exception {
+        when(auth.requireUser(any())).thenThrow(V1Exception.unauthorized());
+
+        mockMvc.perform(get("/api/v1/comments/50"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40100));
+    }
+
+    @Test
+    void focusedCommentThreadValidatesTheRootId() throws Exception {
+        when(auth.requireUser(any())).thenReturn(user);
+
+        mockMvc.perform(get("/api/v1/comments/not-an-id"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40000));
+    }
+
+    @Test
+    void focusedCommentThreadHidesMissingOrInaccessibleResources() throws Exception {
+        when(auth.requireUser(any())).thenReturn(user);
+        when(service.commentThread(eq(user), eq(50L), any())).thenThrow(V1Exception.notFound());
+
+        mockMvc.perform(get("/api/v1/comments/50"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(40400));
+    }
+
+    @Test
+    void focusedCommentThreadIsNeverCached() throws Exception {
+        when(auth.requireUser(any())).thenReturn(user);
+
+        mockMvc.perform(get("/api/v1/comments/50"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"));
+
+        verify(service).commentThread(eq(user), eq(50L), any());
     }
 }

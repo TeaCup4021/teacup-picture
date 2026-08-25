@@ -212,9 +212,71 @@ class M6ServiceTest {
     }
 
     @Test
+    void commentOnAnotherUsersPictureCreatesNavigableNotification() {
+        User viewer = new User(); viewer.setId(11L); viewer.setUserName("Viewer"); viewer.setIsDelete(0);
+        when(access.canView(viewer, personal)).thenReturn(true);
+        when(comments.insert(any(PictureComment.class))).thenAnswer(invocation -> {
+            ((PictureComment) invocation.getArgument(0)).setId(53L);
+            return 1;
+        });
+        when(users.selectById(viewer.getId())).thenReturn(viewer);
+        when(users.selectById(owner.getId())).thenReturn(owner);
+
+        service.createComment(viewer, 100L,
+                new M6Dtos.CreateCommentRequest("comment", "请检查杯口高光", null, null, null, List.of("10")),
+                new MockHttpServletRequest());
+
+        verify(notifications).insert(org.mockito.ArgumentMatchers.<Notification>argThat(notification ->
+                Objects.equals(notification.getUserId(), owner.getId())
+                        && "picture_comment_created".equals(notification.getType())
+                        && notification.getPayload().contains("\"rootId\":\"53\"")
+                        && notification.getPayload().contains("\"commentId\":\"53\"")
+                        && notification.getPayload().contains("\"kind\":\"comment\"")
+                        && notification.getPayload().contains("请检查杯口高光")));
+        verify(notifications, times(1)).insert(any(Notification.class));
+        verify(mentions).insert(org.mockito.ArgumentMatchers.<CommentMention>argThat(mention ->
+                Objects.equals(mention.getUserId(), owner.getId())));
+    }
+
+    @Test
+    void commentThreadLoadsACompleteVisibleThread() {
+        PictureComment root = new PictureComment();
+        root.setId(50L); root.setPictureId(100L); root.setAuthorId(owner.getId());
+        root.setKind("annotation"); root.setBody("杯把位置"); root.setStatus("active");
+        PictureComment reply = new PictureComment();
+        reply.setId(51L); reply.setPictureId(100L); reply.setRootId(50L); reply.setReplyToId(50L);
+        reply.setAuthorId(owner.getId()); reply.setKind("reply"); reply.setBody("收到"); reply.setStatus("active");
+        when(comments.selectById(50L)).thenReturn(root);
+        when(comments.selectList(any())).thenReturn(List.of(reply));
+        when(comments.selectCount(any())).thenReturn(1L);
+        when(users.selectById(owner.getId())).thenReturn(owner);
+
+        M6Dtos.CommentView result = service.commentThread(owner, 50L, new MockHttpServletRequest());
+
+        assertEquals("50", result.id());
+        assertEquals(1, result.replies().size());
+        assertEquals("51", result.replies().get(0).id());
+    }
+
+    @Test
+    void commentThreadHidesMissingAndInaccessibleThreads() {
+        assertEquals(40400, assertThrows(V1Exception.class,
+                () -> service.commentThread(owner, 404L, new MockHttpServletRequest())).getCode());
+
+        PictureComment root = new PictureComment();
+        root.setId(50L); root.setPictureId(100L); root.setAuthorId(owner.getId()); root.setKind("comment");
+        when(comments.selectById(50L)).thenReturn(root);
+        User stranger = new User(); stranger.setId(99L);
+
+        assertEquals(40400, assertThrows(V1Exception.class,
+                () -> service.commentThread(stranger, 50L, new MockHttpServletRequest())).getCode());
+        verify(comments, never()).selectList(any());
+    }
+
+    @Test
     void replyCanTargetAnotherReplyInTheSameThread() {
         PictureComment root = new PictureComment();
-        root.setId(50L); root.setPictureId(100L); root.setPictureVersionId(300L); root.setAuthorId(20L);
+        root.setId(50L); root.setPictureId(100L); root.setPictureVersionId(300L); root.setAuthorId(20L); root.setKind("comment");
         PictureComment target = new PictureComment();
         target.setId(51L); target.setPictureId(100L); target.setRootId(50L); target.setAuthorId(30L);
         when(comments.selectById(50L)).thenReturn(root);
@@ -233,6 +295,8 @@ class M6ServiceTest {
         verify(comments).insert(org.mockito.ArgumentMatchers.<PictureComment>argThat(row ->
                 Objects.equals(row.getRootId(), 50L) && Objects.equals(row.getReplyToId(), 51L)));
         verify(notifications).insert(org.mockito.ArgumentMatchers.<Notification>argThat(notification ->
-                Objects.equals(notification.getUserId(), 30L)));
+                Objects.equals(notification.getUserId(), 30L)
+                        && notification.getPayload().contains("\"rootId\":\"50\"")
+                        && notification.getPayload().contains("\"commentId\":\"52\"")));
     }
 }

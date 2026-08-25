@@ -12,20 +12,22 @@ import {
 } from "@ant-design/icons";
 import { Alert, App, Button, Descriptions, Popconfirm, Result, Skeleton, Space, Tag, Tooltip } from "antd";
 import Link from "next/link";
-import { useState, type MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { usePrototypePicture, usePrototypeSession, useSubmitReview } from "@/features/prototype";
 import { PictureImage } from "@/features/prototype/ui/picture-image";
 import { PublishStatusTag } from "@/features/prototype/ui/publish-status-tag";
-import { interactionKeys, interactionsApi, normalizeAnnotationPosition, usePictureComments } from "@/features/interactions";
+import { interactionKeys, interactionsApi, mergeFocusedThread, normalizeAnnotationPosition, useCommentThread, usePictureComments } from "@/features/interactions";
 import { CommentPanel } from "@/features/interactions/ui/comment-panel";
 import { ShareDialog } from "@/features/interactions/ui/share-dialog";
 
-export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
+export function PictureDetail({ pictureId, focusedThreadId, focusedCommentId }: Readonly<{ pictureId: string; focusedThreadId?: string; focusedCommentId?: string }>) {
   const { message } = App.useApp();
   const picture = usePrototypePicture(pictureId);
   const session = usePrototypeSession();
   const submitReview = useSubmitReview();
   const comments = usePictureComments(pictureId, Boolean(session.data));
+  const focusedThread = useCommentThread(focusedThreadId, Boolean(session.data));
+  const visibleComments = useMemo(() => mergeFocusedThread(comments.data, focusedThread.data), [comments.data, focusedThread.data]);
   const [shareOpen, setShareOpen] = useState(false);
   const [selectingAnchor, setSelectingAnchor] = useState(false);
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -66,7 +68,7 @@ export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
     setSelectingAnchor(false);
   };
 
-  const currentAnnotations = (comments.data?.items ?? []).filter((comment) => comment.kind === "annotation" && !comment.deleted && comment.pictureVersionId === item.currentVersionId && comment.x != null && comment.y != null);
+  const currentAnnotations = (visibleComments?.items ?? []).filter((comment) => comment.kind === "annotation" && !comment.deleted && comment.pictureVersionId === item.currentVersionId && comment.x != null && comment.y != null);
 
   return (
     <main className="content-shell detail-shell">
@@ -79,7 +81,7 @@ export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
         <section className="detail-media" aria-label={item.title}>
           <div className={selectingAnchor ? "detail-image-frame is-placing-annotation" : "detail-image-frame"} style={{ aspectRatio: `${item.width} / ${item.height}` }} onClick={placeAnchor}>
             <PictureImage alt={item.title} priority src={item.imageUrl} />
-            {currentAnnotations.map((comment, index) => <Tooltip title={comment.body} key={comment.id}><button className={comment.resolved ? "annotation-pin is-resolved" : "annotation-pin"} style={{ left: `${comment.x! * 100}%`, top: `${comment.y! * 100}%` }} aria-label={`批注 ${index + 1}`}>{index + 1}</button></Tooltip>)}
+            {currentAnnotations.map((comment, index) => <Tooltip title={comment.body} key={comment.id}><button className={`${comment.resolved ? "annotation-pin is-resolved" : "annotation-pin"}${comment.id === focusedThreadId ? " is-notification-focus" : ""}`} style={{ left: `${comment.x! * 100}%`, top: `${comment.y! * 100}%` }} aria-label={`批注 ${index + 1}`}>{index + 1}</button></Tooltip>)}
             {anchor ? <span className="annotation-pin is-pending" style={{ left: `${anchor.x * 100}%`, top: `${anchor.y * 100}%` }} aria-label="待提交批注位置">+</span> : null}
           </div>
         </section>
@@ -167,7 +169,7 @@ export function PictureDetail({ pictureId }: Readonly<{ pictureId: string }>) {
           ) : null}
         </aside>
       </div>
-      <CommentPanel pictureId={item.id} currentVersionId={item.currentVersionId ?? comments.data?.currentVersionId ?? undefined} comments={comments.data} loading={comments.isLoading} error={comments.isError} authenticated={Boolean(session.data)} refreshKey={interactionKeys.comments(item.id, session.data ? "private" : "public")} pendingAnchor={anchor} onRequestAnchor={() => setSelectingAnchor(true)} onClearAnchor={() => { setAnchor(null); setSelectingAnchor(false); }} onLoadMore={() => void comments.fetchNextPage()} loadingMore={comments.isFetchingNextPage} />
+      <CommentPanel pictureId={item.id} currentVersionId={item.currentVersionId ?? visibleComments?.currentVersionId ?? undefined} comments={visibleComments} loading={comments.isLoading && !focusedThread.data} error={comments.isError} focusError={Boolean(focusedThreadId && focusedThread.isError)} focusedCommentId={focusedCommentId} authenticated={Boolean(session.data)} refreshKey={interactionKeys.comments(item.id, session.data ? "private" : "public")} pendingAnchor={anchor} onRequestAnchor={() => setSelectingAnchor(true)} onClearAnchor={() => { setAnchor(null); setSelectingAnchor(false); }} onLoadMore={() => void comments.fetchNextPage()} loadingMore={comments.isFetchingNextPage} />
       {canShare ? <ShareDialog open={shareOpen} pictureId={item.id} onClose={() => setShareOpen(false)} /> : null}
     </main>
   );

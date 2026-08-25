@@ -67,6 +67,18 @@ describe("M6 interactions API", () => {
     });
   });
 
+  it("loads a complete discussion thread by its root id", async () => {
+    vi.mocked(apiClient.request).mockResolvedValue(envelope({ id: "41", replies: [] }));
+
+    await interactionsApi.commentThread("41");
+
+    expect(apiClient.request).toHaveBeenCalledWith({
+      method: "get",
+      url: "/comments/41",
+      data: undefined,
+    });
+  });
+
   it("sends the fragment secret only in the share access body", async () => {
     vi.mocked(apiClient.request).mockResolvedValue(envelope({ granted: true }));
 

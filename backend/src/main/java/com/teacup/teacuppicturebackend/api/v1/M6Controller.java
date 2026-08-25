@@ -127,6 +127,13 @@ public class M6Controller {
         return response(HttpStatus.CREATED, service.reply(auth.requireUser(request), id(rootId), body, request), request);
     }
 
+    @GetMapping("/comments/{rootId}")
+    public ResponseEntity<V1Response<M6Dtos.CommentView>> commentThread(@PathVariable String rootId,
+            HttpServletRequest request) {
+        return noStore(response(HttpStatus.OK,
+                service.commentThread(auth.requireUser(request), id(rootId), request), request));
+    }
+
     @PatchMapping("/comments/{rootId}")
     public ResponseEntity<V1Response<M6Dtos.CommentView>> updateThread(@PathVariable String rootId,
             @RequestBody M6Dtos.UpdateThreadRequest body, HttpServletRequest request) {

@@ -9,7 +9,7 @@ export function useTeamSpace(id: string) { return useQuery({ queryKey: keys.spac
 export function useTeamMembers(id: string) { return useQuery({ queryKey: keys.members(id), queryFn: () => teamApi.listMembers(id), enabled: Boolean(id) }); }
 export function useTeamPictures(id: string) { return useQuery({ queryKey: keys.pictures(id), queryFn: () => teamApi.listPictures(id), enabled: Boolean(id) }); }
 export function useInvitations() { return useQuery({ queryKey: keys.invitations, queryFn: teamApi.listInvitations }); }
-export function useNotifications(enabled = true) { return useQuery({ queryKey: keys.notifications, queryFn: teamApi.listNotifications, enabled }); }
+export function useNotifications(enabled = true) { return useQuery({ queryKey: keys.notifications, queryFn: teamApi.listNotifications, enabled, refetchInterval: 30_000, refetchIntervalInBackground: false, refetchOnWindowFocus: true }); }
 function useRefresh() { const client = useQueryClient(); return () => client.invalidateQueries({ queryKey: keys.root }); }
 export function useCreateTeamSpace() { const refresh = useRefresh(); return useMutation({ mutationFn: teamApi.createSpace, onSuccess: refresh }); }
 export function useInviteMember() { const refresh = useRefresh(); return useMutation({ mutationFn: ({ spaceId, inviteeId, role }: { spaceId: string; inviteeId: string; role: "viewer" | "editor" }) => teamApi.invite(spaceId, inviteeId, role), onSuccess: refresh }); }

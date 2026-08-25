@@ -217,6 +217,15 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/NotFound' }
   /comments/{rootId}:
+    get:
+      summary: Get one complete discussion thread for notification focus
+      operationId: getCommentThread
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/RootId' }]
+      responses:
+        '200': { $ref: '#/components/responses/CommentResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
     patch:
       summary: Resolve or reopen a discussion thread
       operationId: updateCommentThread

@@ -51,7 +51,7 @@ export interface NotificationItem {
   actor?: TeamMember | null;
   resourceType: string;
   resourceId?: string | null;
-  payload: Record<string, string>;
+  payload: Record<string, unknown>;
   readAt?: string | null;
   createdAt: string;
 }

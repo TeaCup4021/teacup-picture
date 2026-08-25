@@ -2,7 +2,7 @@
 
 import { CheckCircleOutlined, CommentOutlined, DeleteOutlined, EnvironmentOutlined, ReloadOutlined, SendOutlined } from "@ant-design/icons";
 import { Alert, App, Avatar, Button, Empty, Input, List, Segmented, Select, Space, Spin, Tag, Tooltip } from "antd";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useCommentActions, useMentionCandidates } from "../queries";
 import type { CommentItem, CommentPage } from "../model/types";
 
@@ -12,6 +12,8 @@ interface Props {
   comments?: CommentPage;
   loading: boolean;
   error: boolean;
+  focusError?: boolean;
+  focusedCommentId?: string;
   authenticated: boolean;
   refreshKey: readonly unknown[];
   pendingAnchor?: { x: number; y: number } | null;
@@ -32,6 +34,19 @@ export function CommentPanel(props: Props) {
   const actions = useCommentActions(props.refreshKey);
   const candidates = useMentionCandidates(props.pictureId, props.authenticated);
   const items = useMemo(() => props.comments?.items ?? [], [props.comments]);
+  const focusedOnce = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!props.focusedCommentId || focusedOnce.current === props.focusedCommentId) return;
+    const target = document.getElementById(`discussion-${props.focusedCommentId}`);
+    if (!target) return;
+    focusedOnce.current = props.focusedCommentId;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
+      target.focus({ preventScroll: true });
+    });
+  }, [items, props.focusedCommentId]);
 
   const submit = () => {
     if (!body.trim()) return;
@@ -55,6 +70,7 @@ export function CommentPanel(props: Props) {
 
   return <section className="discussion-panel" aria-label="评论与批注">
     <div className="discussion-heading"><div><h2>讨论</h2><span>{items.length ? `${items.length} 个讨论串` : "暂无讨论"}</span></div></div>
+    {props.focusError ? <Alert type="warning" showIcon message="目标讨论不存在或当前账号无权查看" /> : null}
     {props.authenticated ? <div className="comment-composer">
       <div className="comment-composer-toolbar"><Segmented value={mode} onChange={(value) => { setMode(value as typeof mode); if (value === "comment") props.onClearAnchor(); }} options={[{ label: "评论", value: "comment", icon: <CommentOutlined /> }, { label: "位置批注", value: "annotation", icon: <EnvironmentOutlined /> }]} />
       {mode === "annotation" ? <Button icon={<EnvironmentOutlined />} type={props.pendingAnchor ? "primary" : "default"} onClick={props.onRequestAnchor}>{props.pendingAnchor ? "已选择位置" : "在图片上选择位置"}</Button> : null}</div>
@@ -62,13 +78,13 @@ export function CommentPanel(props: Props) {
       <MentionSelect value={mentionedUserIds} onChange={setMentionedUserIds} loading={candidates.isLoading} candidates={candidates.data ?? []} />
       <Button type="primary" icon={<SendOutlined />} loading={actions.create.isPending} disabled={!body.trim()} onClick={submit}>发表</Button>
     </div> : <Alert type="info" showIcon message="登录后可发表评论、回复和批注" />}
-    {props.loading ? <div className="discussion-loading"><Spin /></div> : props.error ? <Alert type="error" showIcon message="评论加载失败" /> : items.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有评论" /> : <List className="comment-thread-list" dataSource={items} renderItem={(item) => <ThreadItem key={item.id} item={item} currentVersionId={props.currentVersionId} authenticated={props.authenticated} replying={replying} replyBody={replyBody} replyMentionedUserIds={replyMentionedUserIds} setReplying={setReplying} setReplyBody={setReplyBody} setReplyMentionedUserIds={setReplyMentionedUserIds} candidates={candidates.data ?? []} candidatesLoading={candidates.isLoading} actions={actions} />} />}
+    {props.loading ? <div className="discussion-loading"><Spin /></div> : props.error ? <Alert type="error" showIcon message="评论加载失败" /> : items.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有评论" /> : <List className="comment-thread-list" dataSource={items} renderItem={(item) => <ThreadItem key={item.id} item={item} focusedCommentId={props.focusedCommentId} currentVersionId={props.currentVersionId} authenticated={props.authenticated} replying={replying} replyBody={replyBody} replyMentionedUserIds={replyMentionedUserIds} setReplying={setReplying} setReplyBody={setReplyBody} setReplyMentionedUserIds={setReplyMentionedUserIds} candidates={candidates.data ?? []} candidatesLoading={candidates.isLoading} actions={actions} />} />}
     {props.comments?.hasMore && props.onLoadMore ? <Button block loading={props.loadingMore} onClick={props.onLoadMore}>加载更多讨论</Button> : null}
   </section>;
 }
 
-function ThreadItem({ item, currentVersionId, authenticated, replying, replyBody, replyMentionedUserIds, setReplying, setReplyBody, setReplyMentionedUserIds, candidates, candidatesLoading, actions }: {
-  item: CommentItem; currentVersionId?: string; authenticated: boolean; replying: string | null; replyBody: string;
+function ThreadItem({ item, focusedCommentId, currentVersionId, authenticated, replying, replyBody, replyMentionedUserIds, setReplying, setReplyBody, setReplyMentionedUserIds, candidates, candidatesLoading, actions }: {
+  item: CommentItem; focusedCommentId?: string; currentVersionId?: string; authenticated: boolean; replying: string | null; replyBody: string;
   replyMentionedUserIds: string[]; setReplying: (id: string | null) => void; setReplyBody: (value: string) => void;
   setReplyMentionedUserIds: (value: string[]) => void; candidates: Array<{ id: string; name: string; avatarUrl?: string | null }>;
   candidatesLoading: boolean;
@@ -81,7 +97,7 @@ function ThreadItem({ item, currentVersionId, authenticated, replying, replyBody
     setReplyMentionedUserIds([]);
   };
   const replyAuthors = new Map([[item.id, item.author.name], ...item.replies.map((reply) => [reply.id, reply.author.name] as const)]);
-  return <List.Item className={item.resolved ? "comment-thread is-resolved" : "comment-thread"}>
+  return <List.Item id={`discussion-${item.id}`} tabIndex={-1} className={`${item.resolved ? "comment-thread is-resolved" : "comment-thread"}${focusedCommentId === item.id ? " is-notification-focus" : ""}`}>
     <div className="comment-thread-body">
       <div className="comment-author"><Avatar src={item.author.avatarUrl}>{item.author.name.slice(0, 1)}</Avatar><div><strong>{item.author.name}</strong><span>{new Date(item.createdAt).toLocaleString("zh-CN")}</span></div></div>
       <div className="comment-copy">{item.deleted ? <em>该评论已删除</em> : item.body}</div>
@@ -97,7 +113,7 @@ function ThreadItem({ item, currentVersionId, authenticated, replying, replyBody
       {replying === item.id ? <ReplyComposer rootId={item.id} replyToId={item.id} targetName={item.author.name} replyBody={replyBody} replyMentionedUserIds={replyMentionedUserIds} setReplying={setReplying} setReplyBody={setReplyBody} setReplyMentionedUserIds={setReplyMentionedUserIds} candidates={candidates} candidatesLoading={candidatesLoading} actions={actions} /> : null}
       {item.replies.length ? <div className="comment-replies">{item.replies.map((reply) => {
         const replyTargetName = reply.replyToId ? replyAuthors.get(reply.replyToId) : undefined;
-        return <div className="comment-reply-entry" key={reply.id}>
+        return <div className={`comment-reply-entry${focusedCommentId === reply.id ? " is-notification-focus" : ""}`} id={`discussion-${reply.id}`} tabIndex={-1} key={reply.id}>
           <div className="comment-reply">
             <Avatar size={24} src={reply.author.avatarUrl}>{reply.author.name.slice(0, 1)}</Avatar>
             <div>

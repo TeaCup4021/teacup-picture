@@ -6,6 +6,7 @@ import type { CommentInput, CommentPage } from "./model/types";
 
 const keys = {
   comments: (id: string, channel: string) => ["interactions", "comments", channel, id] as const,
+  commentThread: (id: string) => ["interactions", "comment-thread", id] as const,
   share: (id: string) => ["interactions", "share", id] as const,
   sharedPicture: (id: string) => ["interactions", "shared-picture", id] as const,
 };
@@ -29,6 +30,14 @@ export function useShareComments(publicId: string, enabled: boolean) {
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.nextCursor ?? undefined : undefined,
     enabled,
     select: flattenCommentPages,
+  });
+}
+
+export function useCommentThread(rootId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.commentThread(rootId ?? ""),
+    queryFn: () => interactionsApi.commentThread(rootId!),
+    enabled: enabled && Boolean(rootId),
   });
 }
 
