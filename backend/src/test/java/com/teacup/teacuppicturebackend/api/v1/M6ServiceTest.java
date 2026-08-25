@@ -210,4 +210,29 @@ class M6ServiceTest {
         assertEquals(40000, error.getCode());
         verify(mentions, never()).insert(any(CommentMention.class));
     }
+
+    @Test
+    void replyCanTargetAnotherReplyInTheSameThread() {
+        PictureComment root = new PictureComment();
+        root.setId(50L); root.setPictureId(100L); root.setPictureVersionId(300L); root.setAuthorId(20L);
+        PictureComment target = new PictureComment();
+        target.setId(51L); target.setPictureId(100L); target.setRootId(50L); target.setAuthorId(30L);
+        when(comments.selectById(50L)).thenReturn(root);
+        when(comments.selectById(51L)).thenReturn(target);
+        when(comments.insert(any(PictureComment.class))).thenAnswer(invocation -> {
+            ((PictureComment) invocation.getArgument(0)).setId(52L);
+            return 1;
+        });
+        when(users.selectById(owner.getId())).thenReturn(owner);
+
+        M6Dtos.CommentView result = service.reply(owner, 50L,
+                new M6Dtos.CreateReplyRequest("补充回复", "51", List.of()),
+                new MockHttpServletRequest());
+
+        assertEquals("51", result.replyToId());
+        verify(comments).insert(org.mockito.ArgumentMatchers.<PictureComment>argThat(row ->
+                Objects.equals(row.getRootId(), 50L) && Objects.equals(row.getReplyToId(), 51L)));
+        verify(notifications).insert(org.mockito.ArgumentMatchers.<Notification>argThat(notification ->
+                Objects.equals(notification.getUserId(), 30L)));
+    }
 }

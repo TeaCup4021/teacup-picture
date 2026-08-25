@@ -955,6 +955,11 @@ select {
   background: var(--app-surface-subtle);
 }
 
+.comment-reply-entry {
+  display: grid;
+  gap: 8px;
+}
+
 .comment-reply {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto;
@@ -966,6 +971,29 @@ select {
   display: grid;
   min-width: 0;
   gap: 3px;
+}
+
+.comment-reply-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.comment-reply-heading small {
+  color: var(--app-muted);
+  font-weight: 400;
+}
+
+.comment-reply > .comment-reply-actions {
+  display: flex;
+  align-self: center;
+  align-items: center;
+  gap: 2px;
+}
+
+.comment-reply-entry .reply-composer {
+  padding-left: 32px;
 }
 
 .comment-reply span {

@@ -75,6 +75,12 @@ function ThreadItem({ item, currentVersionId, authenticated, replying, replyBody
   actions: ReturnType<typeof useCommentActions>;
 }) {
   const isHistorical = item.kind === "annotation" && item.pictureVersionId !== currentVersionId;
+  const startReply = (replyToId: string) => {
+    setReplying(replying === replyToId ? null : replyToId);
+    setReplyBody("");
+    setReplyMentionedUserIds([]);
+  };
+  const replyAuthors = new Map([[item.id, item.author.name], ...item.replies.map((reply) => [reply.id, reply.author.name] as const)]);
   return <List.Item className={item.resolved ? "comment-thread is-resolved" : "comment-thread"}>
     <div className="comment-thread-body">
       <div className="comment-author"><Avatar src={item.author.avatarUrl}>{item.author.name.slice(0, 1)}</Avatar><div><strong>{item.author.name}</strong><span>{new Date(item.createdAt).toLocaleString("zh-CN")}</span></div></div>
@@ -84,15 +90,45 @@ function ThreadItem({ item, currentVersionId, authenticated, replying, replyBody
         {item.resolved ? <Tag icon={<CheckCircleOutlined />} color="green">已解决</Tag> : null}
       </Space>
       <div className="comment-actions">
-        {authenticated && !item.deleted ? <Button type="link" size="small" onClick={() => { setReplying(replying === item.id ? null : item.id); setReplyBody(""); setReplyMentionedUserIds([]); }}>回复</Button> : null}
+        {authenticated && !item.deleted ? <Button type="link" size="small" onClick={() => startReply(item.id)}>回复</Button> : null}
         {item.canResolve ? <Button type="link" size="small" icon={item.resolved ? <ReloadOutlined /> : <CheckCircleOutlined />} loading={actions.resolve.isPending} onClick={() => actions.resolve.mutate({ rootId: item.id, resolved: !item.resolved })}>{item.resolved ? "重新打开" : "解决"}</Button> : null}
         {item.canDelete ? <Tooltip title="删除评论"><Button aria-label="删除评论" danger type="text" size="small" icon={<DeleteOutlined />} onClick={() => actions.remove.mutate(item.id)} /></Tooltip> : null}
       </div>
-      {replying === item.id ? <div className="reply-composer"><Input.TextArea aria-label="回复内容" autoSize={{ minRows: 2, maxRows: 4 }} maxLength={2000} value={replyBody} onChange={(event) => setReplyBody(event.target.value)} /><MentionSelect value={replyMentionedUserIds} onChange={setReplyMentionedUserIds} loading={candidatesLoading} candidates={candidates} /><Button type="primary" size="small" loading={actions.reply.isPending} disabled={!replyBody.trim()} onClick={() => actions.reply.mutate({ rootId: item.id, body: replyBody.trim(), mentionedUserIds: replyMentionedUserIds }, { onSuccess: () => { setReplying(null); setReplyBody(""); setReplyMentionedUserIds([]); } })}>回复</Button></div> : null}
-      {item.replies.length ? <div className="comment-replies">{item.replies.map((reply) => <div className="comment-reply" key={reply.id}><Avatar size={24} src={reply.author.avatarUrl}>{reply.author.name.slice(0, 1)}</Avatar><div><strong>{reply.author.name}</strong><span>{reply.deleted ? "该回复已删除" : reply.body}</span><small>{new Date(reply.createdAt).toLocaleString("zh-CN")}</small></div>{reply.canDelete ? <Button aria-label="删除回复" danger type="text" size="small" icon={<DeleteOutlined />} onClick={() => actions.remove.mutate(reply.id)} /> : null}</div>)}</div> : null}
+      {replying === item.id ? <ReplyComposer rootId={item.id} replyToId={item.id} targetName={item.author.name} replyBody={replyBody} replyMentionedUserIds={replyMentionedUserIds} setReplying={setReplying} setReplyBody={setReplyBody} setReplyMentionedUserIds={setReplyMentionedUserIds} candidates={candidates} candidatesLoading={candidatesLoading} actions={actions} /> : null}
+      {item.replies.length ? <div className="comment-replies">{item.replies.map((reply) => {
+        const replyTargetName = reply.replyToId ? replyAuthors.get(reply.replyToId) : undefined;
+        return <div className="comment-reply-entry" key={reply.id}>
+          <div className="comment-reply">
+            <Avatar size={24} src={reply.author.avatarUrl}>{reply.author.name.slice(0, 1)}</Avatar>
+            <div>
+              <div className="comment-reply-heading"><strong>{reply.author.name}</strong>{reply.replyToId !== item.id && replyTargetName ? <small>回复 {replyTargetName}</small> : null}</div>
+              <span>{reply.deleted ? "该回复已删除" : reply.body}</span>
+              <small>{new Date(reply.createdAt).toLocaleString("zh-CN")}</small>
+            </div>
+            <div className="comment-reply-actions">
+              {authenticated && !reply.deleted ? <Button type="link" size="small" onClick={() => startReply(reply.id)}>回复</Button> : null}
+              {reply.canDelete ? <Tooltip title="删除回复"><Button aria-label="删除回复" danger type="text" size="small" icon={<DeleteOutlined />} onClick={() => actions.remove.mutate(reply.id)} /></Tooltip> : null}
+            </div>
+          </div>
+          {replying === reply.id ? <ReplyComposer rootId={item.id} replyToId={reply.id} targetName={reply.author.name} replyBody={replyBody} replyMentionedUserIds={replyMentionedUserIds} setReplying={setReplying} setReplyBody={setReplyBody} setReplyMentionedUserIds={setReplyMentionedUserIds} candidates={candidates} candidatesLoading={candidatesLoading} actions={actions} /> : null}
+        </div>;
+      })}</div> : null}
       {item.replyCount > item.replies.length ? <span className="reply-overflow">还有 {item.replyCount - item.replies.length} 条较早回复</span> : null}
     </div>
   </List.Item>;
+}
+
+function ReplyComposer({ rootId, replyToId, targetName, replyBody, replyMentionedUserIds, setReplying, setReplyBody, setReplyMentionedUserIds, candidates, candidatesLoading, actions }: {
+  rootId: string; replyToId: string; targetName: string; replyBody: string; replyMentionedUserIds: string[];
+  setReplying: (id: string | null) => void; setReplyBody: (value: string) => void;
+  setReplyMentionedUserIds: (value: string[]) => void; candidates: Array<{ id: string; name: string; avatarUrl?: string | null }>;
+  candidatesLoading: boolean; actions: ReturnType<typeof useCommentActions>;
+}) {
+  return <div className="reply-composer">
+    <Input.TextArea aria-label="回复内容" placeholder={`回复 ${targetName}`} autoSize={{ minRows: 2, maxRows: 4 }} maxLength={2000} value={replyBody} onChange={(event) => setReplyBody(event.target.value)} />
+    <MentionSelect value={replyMentionedUserIds} onChange={setReplyMentionedUserIds} loading={candidatesLoading} candidates={candidates} />
+    <Button type="primary" size="small" loading={actions.reply.isPending} disabled={!replyBody.trim()} onClick={() => actions.reply.mutate({ rootId, replyToId, body: replyBody.trim(), mentionedUserIds: replyMentionedUserIds }, { onSuccess: () => { setReplying(null); setReplyBody(""); setReplyMentionedUserIds([]); } })}>回复</Button>
+  </div>;
 }
 
 function MentionSelect({ value, onChange, loading, candidates }: {

@@ -48,7 +48,8 @@ export const interactionsApi = {
     kind: input.kind, body: input.body, pictureVersionId: input.pictureVersionId ?? null,
     x: input.x ?? null, y: input.y ?? null, mentionedUserIds: input.mentionedUserIds ?? [],
   }),
-  reply: (rootId: string, body: string, mentionedUserIds: string[] = []) => request<CommentItem>("post", `/comments/${rootId}/replies`, { body, replyToId: rootId, mentionedUserIds }),
+  reply: (rootId: string, replyToId: string, body: string, mentionedUserIds: string[] = []) =>
+    request<CommentItem>("post", `/comments/${rootId}/replies`, { body, replyToId, mentionedUserIds }),
   setResolved: (rootId: string, resolved: boolean) => request<CommentItem>("patch", `/comments/${rootId}`, { resolved }),
   deleteComment: (commentId: string) => request<void>("delete", `/comments/${commentId}`),
   withdrawPublication: (pictureId: string) => request<unknown>("delete", `/pictures/${pictureId}/publication`),

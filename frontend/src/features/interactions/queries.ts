@@ -65,7 +65,11 @@ export function useCommentActions(refreshKey: readonly unknown[]) {
   const refresh = () => client.invalidateQueries({ queryKey: refreshKey });
   return {
     create: useMutation({ mutationFn: (input: CommentInput) => interactionsApi.createComment(input), onSuccess: refresh }),
-    reply: useMutation({ mutationFn: ({ rootId, body, mentionedUserIds }: { rootId: string; body: string; mentionedUserIds?: string[] }) => interactionsApi.reply(rootId, body, mentionedUserIds), onSuccess: refresh }),
+    reply: useMutation({
+      mutationFn: ({ rootId, replyToId, body, mentionedUserIds }: { rootId: string; replyToId: string; body: string; mentionedUserIds?: string[] }) =>
+        interactionsApi.reply(rootId, replyToId, body, mentionedUserIds),
+      onSuccess: refresh,
+    }),
     resolve: useMutation({ mutationFn: ({ rootId, resolved }: { rootId: string; resolved: boolean }) => interactionsApi.setResolved(rootId, resolved), onSuccess: refresh }),
     remove: useMutation({ mutationFn: interactionsApi.deleteComment, onSuccess: refresh }),
   };

@@ -55,6 +55,18 @@ describe("M6 interactions API", () => {
     });
   });
 
+  it("keeps the thread root and nested reply target separate", async () => {
+    vi.mocked(apiClient.request).mockResolvedValue(envelope({ id: "92" }));
+
+    await interactionsApi.reply("41", "57", "同意这条回复", ["12"]);
+
+    expect(apiClient.request).toHaveBeenCalledWith({
+      method: "post",
+      url: "/comments/41/replies",
+      data: { body: "同意这条回复", replyToId: "57", mentionedUserIds: ["12"] },
+    });
+  });
+
   it("sends the fragment secret only in the share access body", async () => {
     vi.mocked(apiClient.request).mockResolvedValue(envelope({ granted: true }));
 

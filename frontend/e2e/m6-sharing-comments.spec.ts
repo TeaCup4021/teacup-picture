@@ -73,6 +73,7 @@ test("M6 completes protected sharing, login continuation, comments, and annotati
   const ownerComment = `所有者讨论 ${suffix}`;
   const viewerComment = `访问者评论 ${suffix}`;
   const viewerReply = `结构化提及回复 ${suffix}`;
+  const nestedReply = `回复已有回复 ${suffix}`;
   const annotation = `杯把高光批注 ${suffix}`;
 
   const viewerContext = await browser.newContext();
@@ -161,10 +162,30 @@ test("M6 completes protected sharing, login continuation, comments, and annotati
   const replyRequestPromise = viewerPage.waitForRequest(
     (request) => request.method() === "POST" && /\/comments\/\d+\/replies$/.test(request.url()),
   );
+  const replyResponsePromise = viewerPage.waitForResponse(
+    (response) => response.request().method() === "POST" && /\/comments\/\d+\/replies$/.test(response.url()),
+  );
   await viewerThread.locator(".reply-composer").getByRole("button", { name: /回\s*复/ }).click();
-  const replyPayload = (await replyRequestPromise).postDataJSON() as { mentionedUserIds: string[] };
+  const replyRequest = await replyRequestPromise;
+  const replyPayload = replyRequest.postDataJSON() as { replyToId: string; mentionedUserIds: string[] };
   expect(replyPayload.mentionedUserIds).toHaveLength(1);
+  const rootId = replyRequest.url().match(/\/comments\/(\d+)\/replies$/)?.[1];
+  expect(replyPayload.replyToId).toBe(rootId);
+  const replyResponse = await replyResponsePromise;
+  const replyEnvelope = await replyResponse.json() as { data: { id: string } };
   await expect(viewerPage.getByText(viewerReply, { exact: true })).toBeVisible();
+
+  const replyItem = viewerThread.locator(".comment-reply").filter({ hasText: viewerReply });
+  await replyItem.getByRole("button", { name: "回复", exact: true }).click();
+  await viewerThread.getByLabel("回复内容").fill(nestedReply);
+  const nestedReplyRequestPromise = viewerPage.waitForRequest(
+    (request) => request.method() === "POST" && /\/comments\/\d+\/replies$/.test(request.url()),
+  );
+  await viewerThread.locator(".reply-composer").getByRole("button", { name: /回\s*复/ }).click();
+  const nestedReplyRequest = await nestedReplyRequestPromise;
+  expect(nestedReplyRequest.url()).toMatch(new RegExp(`/comments/${rootId}/replies$`));
+  expect((nestedReplyRequest.postDataJSON() as { replyToId: string }).replyToId).toBe(replyEnvelope.data.id);
+  await expect(viewerPage.getByText(nestedReply, { exact: true })).toBeVisible();
 
   await viewerComposer.getByText("位置批注", { exact: true }).click();
   await viewerComposer.getByRole("button", { name: "在图片上选择位置" }).click();
