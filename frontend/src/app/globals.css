@@ -957,7 +957,18 @@ select {
   animation: annotation-notification-focus 1.2s ease-in-out 2;
 }
 
+.annotation-pin.is-comment-focus {
+  animation: annotation-comment-focus 1.2s ease-in-out 2;
+}
+
 @keyframes annotation-notification-focus {
+  50% {
+    box-shadow: 0 0 0 8px rgb(51 112 255 / 22%);
+    transform: translate(-50%, -50%) scale(1.16);
+  }
+}
+
+@keyframes annotation-comment-focus {
   50% {
     box-shadow: 0 0 0 8px rgb(51 112 255 / 22%);
     transform: translate(-50%, -50%) scale(1.16);
@@ -1085,6 +1096,14 @@ select {
 
 .comment-copy em {
   color: var(--app-muted);
+}
+
+.annotation-location-button.ant-btn-link {
+  height: 24px;
+  padding-inline: 7px;
+  border: 1px solid #b8cdfd;
+  background: #edf3ff;
+  font-size: 12px;
 }
 
 .comment-actions {

@@ -244,6 +244,14 @@ test("M6 completes protected sharing, login continuation, comments, and annotati
   await expect(viewerPage.locator('.annotation-pin[title="' + annotation + '"]')).toBeVisible();
 
   const annotationThread = viewerPage.locator(".comment-thread").filter({ hasText: annotation });
+  await annotationThread.getByRole("button", { name: "当前版本批注" }).click();
+  const locatedAnnotation = viewerPage.locator('.annotation-pin[title="' + annotation + '"]');
+  await expect(locatedAnnotation).toHaveClass(/is-comment-focus/);
+  await expect(locatedAnnotation).toBeFocused();
+  await expect.poll(() => locatedAnnotation.evaluate((pin) => {
+      const bounds = pin.getBoundingClientRect();
+      return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+    })).toBe(true);
   const resolveResponsePromise = viewerPage.waitForResponse(
     (response) => response.request().method() === "PATCH" && /\/comments\/\d+$/.test(response.url()),
   );

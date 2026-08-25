@@ -68,7 +68,8 @@ export function PictureDetail({ pictureId, focusedThreadId, focusedCommentId }: 
     setSelectingAnchor(false);
   };
 
-  const currentAnnotations = (visibleComments?.items ?? []).filter((comment) => comment.kind === "annotation" && !comment.deleted && comment.pictureVersionId === item.currentVersionId && comment.x != null && comment.y != null);
+  const currentVersionId = item.currentVersionId ?? visibleComments?.currentVersionId ?? undefined;
+  const currentAnnotations = (visibleComments?.items ?? []).filter((comment) => comment.kind === "annotation" && !comment.deleted && comment.pictureVersionId === currentVersionId && comment.x != null && comment.y != null);
 
   return (
     <main className="content-shell detail-shell">
@@ -81,7 +82,7 @@ export function PictureDetail({ pictureId, focusedThreadId, focusedCommentId }: 
         <section className="detail-media" aria-label={item.title}>
           <div className={selectingAnchor ? "detail-image-frame is-placing-annotation" : "detail-image-frame"} style={{ aspectRatio: `${item.width} / ${item.height}` }} onClick={placeAnchor}>
             <PictureImage alt={item.title} priority src={item.imageUrl} />
-            {currentAnnotations.map((comment, index) => <Tooltip title={comment.body} key={comment.id}><button className={`${comment.resolved ? "annotation-pin is-resolved" : "annotation-pin"}${comment.id === focusedThreadId ? " is-notification-focus" : ""}`} style={{ left: `${comment.x! * 100}%`, top: `${comment.y! * 100}%` }} aria-label={`批注 ${index + 1}`}>{index + 1}</button></Tooltip>)}
+            {currentAnnotations.map((comment, index) => <Tooltip title={comment.body} key={comment.id}><button id={`annotation-pin-${comment.id}`} className={`${comment.resolved ? "annotation-pin is-resolved" : "annotation-pin"}${comment.id === focusedThreadId ? " is-notification-focus" : ""}`} style={{ left: `${comment.x! * 100}%`, top: `${comment.y! * 100}%` }} aria-label={`批注 ${index + 1}：${comment.body}`}>{index + 1}</button></Tooltip>)}
             {anchor ? <span className="annotation-pin is-pending" style={{ left: `${anchor.x * 100}%`, top: `${anchor.y * 100}%` }} aria-label="待提交批注位置">+</span> : null}
           </div>
         </section>
@@ -169,7 +170,7 @@ export function PictureDetail({ pictureId, focusedThreadId, focusedCommentId }: 
           ) : null}
         </aside>
       </div>
-      <CommentPanel pictureId={item.id} currentVersionId={item.currentVersionId ?? visibleComments?.currentVersionId ?? undefined} comments={visibleComments} loading={comments.isLoading && !focusedThread.data} error={comments.isError} focusError={Boolean(focusedThreadId && focusedThread.isError)} focusedCommentId={focusedCommentId} authenticated={Boolean(session.data)} refreshKey={interactionKeys.comments(item.id, session.data ? "private" : "public")} pendingAnchor={anchor} onRequestAnchor={() => setSelectingAnchor(true)} onClearAnchor={() => { setAnchor(null); setSelectingAnchor(false); }} onLoadMore={() => void comments.fetchNextPage()} loadingMore={comments.isFetchingNextPage} />
+      <CommentPanel pictureId={item.id} currentVersionId={currentVersionId} comments={visibleComments} loading={comments.isLoading && !focusedThread.data} error={comments.isError} focusError={Boolean(focusedThreadId && focusedThread.isError)} focusedCommentId={focusedCommentId} authenticated={Boolean(session.data)} refreshKey={interactionKeys.comments(item.id, session.data ? "private" : "public")} pendingAnchor={anchor} onRequestAnchor={() => setSelectingAnchor(true)} onClearAnchor={() => { setAnchor(null); setSelectingAnchor(false); }} onLoadMore={() => void comments.fetchNextPage()} loadingMore={comments.isFetchingNextPage} />
       {canShare ? <ShareDialog open={shareOpen} pictureId={item.id} onClose={() => setShareOpen(false)} /> : null}
     </main>
   );

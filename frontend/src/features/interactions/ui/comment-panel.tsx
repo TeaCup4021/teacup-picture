@@ -23,6 +23,26 @@ interface Props {
   loadingMore?: boolean;
 }
 
+const annotationFocusTimers = new Map<string, number>();
+
+function locateAnnotation(annotationId: string) {
+  const target = document.getElementById(`annotation-pin-${annotationId}`);
+  if (!target) return false;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const activeTimer = annotationFocusTimers.get(annotationId);
+  if (activeTimer != null) window.clearTimeout(activeTimer);
+  target.classList.remove("is-comment-focus");
+  void target.offsetWidth;
+  target.classList.add("is-comment-focus");
+  annotationFocusTimers.set(annotationId, window.setTimeout(() => {
+    target.classList.remove("is-comment-focus");
+    annotationFocusTimers.delete(annotationId);
+  }, 2500));
+  target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
+  target.focus({ preventScroll: true });
+  return true;
+}
+
 export function CommentPanel(props: Props) {
   const { message } = App.useApp();
   const [mode, setMode] = useState<"comment" | "annotation">("comment");
@@ -91,6 +111,7 @@ function ThreadItem({ item, focusedCommentId, currentVersionId, authenticated, r
   actions: ReturnType<typeof useCommentActions>;
 }) {
   const isHistorical = item.kind === "annotation" && item.pictureVersionId !== currentVersionId;
+  const canLocate = item.kind === "annotation" && !item.deleted && !isHistorical && item.x != null && item.y != null;
   const startReply = (replyToId: string) => {
     setReplying(replying === replyToId ? null : replyToId);
     setReplyBody("");
@@ -102,7 +123,8 @@ function ThreadItem({ item, focusedCommentId, currentVersionId, authenticated, r
       <div className="comment-author"><Avatar src={item.author.avatarUrl}>{item.author.name.slice(0, 1)}</Avatar><div><strong>{item.author.name}</strong><span>{new Date(item.createdAt).toLocaleString("zh-CN")}</span></div></div>
       <div className="comment-copy">{item.deleted ? <em>该评论已删除</em> : item.body}</div>
       <Space size={6} wrap>
-        {item.kind === "annotation" ? <Tag icon={<EnvironmentOutlined />} color={isHistorical ? "default" : "blue"}>{isHistorical ? "历史版本批注" : "当前版本批注"}</Tag> : null}
+        {canLocate ? <Button className="annotation-location-button" type="link" size="small" icon={<EnvironmentOutlined />} onClick={() => locateAnnotation(item.id)}>当前版本批注</Button> : null}
+        {item.kind === "annotation" && !canLocate ? <Tag icon={<EnvironmentOutlined />} color={isHistorical ? "default" : "blue"}>{isHistorical ? "历史版本批注" : "当前版本批注"}</Tag> : null}
         {item.resolved ? <Tag icon={<CheckCircleOutlined />} color="green">已解决</Tag> : null}
       </Space>
       <div className="comment-actions">
