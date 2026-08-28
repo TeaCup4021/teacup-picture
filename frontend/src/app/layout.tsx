@@ -15,9 +15,7 @@ export const metadata: Metadata = {
 
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  
   return (
-
     <html lang="zh-CN">
       <body>
         <AntdRegistry>
@@ -27,6 +25,5 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         </AntdRegistry>
       </body>
     </html>
-
   );
 }
