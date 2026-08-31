@@ -5,17 +5,18 @@ import { AppChrome } from "@/features/prototype/ui/app-chrome";
 import "./globals.css";
 
 export const metadata: Metadata = {
+
   title: {
     default: "茶杯图库",
     template: "%s | 茶杯图库",
   },
   description: "茶杯云图库",
+  
 };
 
 
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-
   return (
     <html lang="zh-CN">
       <body>
@@ -27,5 +28,4 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </body>
     </html>
   );
-  
 }
