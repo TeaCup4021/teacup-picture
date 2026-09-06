@@ -9,12 +9,16 @@ import com.teacup.teacuppicturebackend.storage.PictureStorage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -25,13 +29,41 @@ import static org.mockito.Mockito.when;
 
 class AiTaskRunnerTest {
     private final PictureStorage storage = mock(PictureStorage.class);
+    private final AiTaskMapper taskMapper = mock(AiTaskMapper.class);
+    private final TransactionTemplate transactions = mock(TransactionTemplate.class);
     private AiTaskRunner runner;
 
     @BeforeEach
     void setUp() {
-        runner = new AiTaskRunner(mock(AiTaskMapper.class), mock(PictureMapper.class), mock(UserMapper.class),
+        when(transactions.execute(any())).thenAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
+        runner = new AiTaskRunner(taskMapper, mock(PictureMapper.class), mock(UserMapper.class),
                 mock(AiProviderRegistry.class), storage, mock(PersonalSpaceService.class), mock(M1Service.class),
-                mock(AiTaskService.class), 15);
+                mock(AiTaskService.class), transactions, 15);
+    }
+
+    @Test
+    void claimsQueuedTaskWithConditionalUpdateBeforeLoadingIt() {
+        AiTask task = new AiTask();
+        task.setId(31L);
+        task.setStatus("running");
+        when(taskMapper.claimQueued(eq(31L), any())).thenReturn(1);
+        when(taskMapper.selectById(31L)).thenReturn(task);
+
+        assertSame(task, runner.markRunning(31L));
+        verify(taskMapper).claimQueued(eq(31L), any());
+        verify(taskMapper).selectById(31L);
+    }
+
+    @Test
+    void skipsProviderClaimWhenTaskIsNoLongerQueued() {
+        when(taskMapper.claimQueued(eq(31L), any())).thenReturn(0);
+
+        assertNull(runner.markRunning(31L));
+        verify(taskMapper).claimQueued(eq(31L), any());
+        verify(taskMapper, org.mockito.Mockito.never()).selectById(31L);
     }
 
     @Test

@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.io.ByteArrayInputStream;
@@ -32,11 +33,13 @@ public class AiTaskRunner {
     private final PersonalSpaceService personalSpaceService;
     private final M1Service m1Service;
     private final AiTaskService taskService;
+    private final TransactionTemplate transactionTemplate;
     private final long runningTimeoutMinutes;
 
     public AiTaskRunner(AiTaskMapper taskMapper, PictureMapper pictureMapper, UserMapper userMapper,
                          AiProviderRegistry providerRegistry, PictureStorage storage,
                          PersonalSpaceService personalSpaceService, M1Service m1Service, @Lazy AiTaskService taskService,
+                         TransactionTemplate transactionTemplate,
                          @Value("${teacup.ai.running-timeout-minutes:15}") long runningTimeoutMinutes) {
         this.taskMapper = taskMapper;
         this.pictureMapper = pictureMapper;
@@ -46,6 +49,7 @@ public class AiTaskRunner {
         this.personalSpaceService = personalSpaceService;
         this.m1Service = m1Service;
         this.taskService = taskService;
+        this.transactionTemplate = transactionTemplate;
         this.runningTimeoutMinutes = runningTimeoutMinutes;
     }
 
@@ -119,15 +123,11 @@ public class AiTaskRunner {
         return picture.getUrl();
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public AiTask markRunning(long taskId) {
-        AiTask task = taskMapper.selectOne(new LambdaQueryWrapper<AiTask>().eq(AiTask::getId, taskId).last("FOR UPDATE"));
-        if (task == null || !"queued".equals(task.getStatus())) return null;
-        task.setStatus("running");
-        task.setInvocationStarted(1);
-        task.setStartTime(LocalDateTime.now());
-        taskMapper.updateById(task);
-        return task;
+        return transactionTemplate.execute(status -> {
+            if (taskMapper.claimQueued(taskId, LocalDateTime.now()) != 1) return null;
+            return taskMapper.selectById(taskId);
+        });
     }
 
     @Transactional(rollbackFor = Exception.class)
