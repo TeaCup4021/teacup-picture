@@ -45,7 +45,7 @@ public class M2Controller {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw V1Exception.badRequest("Idempotency-Key 不能为空");
         }
-        AiTaskService.CreateResult result = tasks.creare(user, body, idempotencyKey);
+        AiTaskService.CreateResult result = tasks.create(user, body, idempotencyKey);
         return response(result.created() ? HttpStatus.CREATED : HttpStatus.OK, result.task(), request);
     }
 
