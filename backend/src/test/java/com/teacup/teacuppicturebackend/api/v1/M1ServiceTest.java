@@ -13,17 +13,22 @@ import com.teacup.teacuppicturebackend.service.SpaceService;
 import com.teacup.teacuppicturebackend.service.UserService;
 import com.teacup.teacuppicturebackend.storage.PictureAssetService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
+import com.teacup.teacuppicturebackend.storage.UrlImportPreviewService;
 import com.baomidou.mybatisplus.extension.conditions.update.LambdaUpdateChainWrapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.util.List;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,6 +40,7 @@ class M1ServiceTest {
     PublishRequestMapper publishRequestMapper = mock(PublishRequestMapper.class);
     UserMapper userMapper = mock(UserMapper.class);
     PictureStorage storage = mock(PictureStorage.class);
+    UrlImportPreviewService urlPreviews = mock(UrlImportPreviewService.class);
     PictureAssetService assets = mock(PictureAssetService.class);
     M1Service service;
     User user;
@@ -42,7 +48,8 @@ class M1ServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new M1Service(userService, personalSpaceService, spaceService, pictureMapper, publishRequestMapper, userMapper, storage, assets);
+        service = new M1Service(userService, personalSpaceService, spaceService, pictureMapper, publishRequestMapper,
+                userMapper, storage, assets, null, null, urlPreviews);
         user = new User(); user.setId(11L); user.setUserName("Tester"); user.setUserRole("user");
         space = new Space().setId(21L).setUserId(11L).setMaxCount(100L).setMaxSize(1000000L).setTotalCount(0L).setTotalSize(0L);
         when(personalSpaceService.getOrCreatePersonalSpace(11L)).thenReturn(space);
@@ -80,5 +87,27 @@ class M1ServiceTest {
         when(publishRequestMapper.selectById(41L)).thenReturn(request);
         when(userService.isAdmin(user)).thenReturn(false);
         assertEquals(40101, assertThrows(V1Exception.class, () -> service.decide(user, 41L, true, null)).getCode());
+    }
+
+    @Test
+    void urlImportReusesTheClaimedPreviewInsteadOfDownloadingAgain() throws Exception {
+        Path previewFile = Files.createTempFile("m1-preview-", ".png");
+        Files.write(previewFile, new byte[]{1, 2, 3});
+        try {
+            when(urlPreviews.claim(user, "preview-token", "https://example.com/photo.png"))
+                    .thenReturn(new UrlImportPreviewService.ClaimedPreview(previewFile, "photo.png", "image/png"));
+            when(storage.store(any(java.io.InputStream.class), eq("photo.png"), eq("image/png"), eq(21L)))
+                    .thenReturn(new PictureStorage.StoredPicture("spaces/21/pictures/abc/original.png", 100, 10, 20, "png", "image/png", "checksum"));
+
+            M1Dtos.PictureDetail result = service.importUrl(user,
+                    new M1Dtos.UrlImportRequest("https://example.com/photo.png", "preview-token", null,
+                            "A", null, null, List.of()));
+
+            assertEquals("21", result.spaceId());
+            verify(storage).store(any(java.io.InputStream.class), eq("photo.png"), eq("image/png"), eq(21L));
+            verify(storage, never()).importUrl(any(), any(Long.class));
+        } finally {
+            Files.deleteIfExists(previewFile);
+        }
     }
 }

@@ -30,7 +30,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create a Cookie session */
+        /** Create a Cookie session for the current browser tab */
         post: operations["login"];
         delete?: never;
         options?: never;
@@ -48,8 +48,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Clear the current session
-         * @description Idempotent even when the session has already expired.
+         * Clear the current browser-tab session
+         * @description Idempotent even when the session has already expired. Other tab contexts in the same HttpSession remain logged in.
          */
         post: operations["logout"];
         delete?: never;
@@ -120,6 +120,26 @@ export interface paths {
         put?: never;
         /** Import one image from an HTTP or HTTPS URL */
         post: operations["importPictureFromUrl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pictures/url-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download and preview an image URL before importing it
+         * @description Returns a JPEG preview and a short-lived, user-bound token. Supplying the token to the URL import endpoint reuses the downloaded original once.
+         */
+        get: operations["previewPictureUrl"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -433,6 +453,11 @@ export interface components {
         PictureUrlImportRequest: {
             /** Format: uri */
             url: string;
+            /**
+             * Format: uuid
+             * @description Optional token returned by the URL preview endpoint; it is single-use and expires after a short server-side retention period.
+             */
+            previewToken?: string;
             spaceId?: components["schemas"]["Id"];
             name?: string;
             introduction?: string;
@@ -704,6 +729,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Opaque per-tab login-state selector; it is not an authentication token. */
+        SessionContext: string;
         Page: number;
         PageSize: number;
         PictureId: components["schemas"]["Id"];
@@ -884,6 +911,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PictureUrlImportRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PictureUrlImportRequest"];
             };
         };
         responses: {
@@ -900,6 +928,34 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+        };
+    };
+    previewPictureUrl: {
+        parameters: {
+            query: {
+                url: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JPEG preview; the original image remains server-side until import or token expiry. */
+            200: {
+                headers: {
+                    /** @description Short-lived opaque token bound to the current user and requested URL. */
+                    "X-Teacup-Preview-Token"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
         };

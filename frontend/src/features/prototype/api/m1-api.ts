@@ -7,6 +7,8 @@ import type {
   UploadPictureInput,
 } from "@/features/prototype/model/types";
 
+const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+
 interface ApiUser { id: string; account: string; name: string; role: "user" | "admin" }
 interface ApiAuthor { id: string; name: string }
 interface ApiPicture {
@@ -56,7 +58,11 @@ async function post<T>(url: string, body?: unknown): Promise<T> {
   return unwrapApiResponse((await apiClient.post<ApiEnvelope<T>>(url, body)).data);
 }
 
-async function postForm<T>(url: string, fields: Record<string, string | string[] | undefined>): Promise<T> {
+async function postForm<T>(
+  url: string,
+  fields: Record<string, string | string[] | undefined>,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
   const body = new URLSearchParams();
   for (const [key, value] of Object.entries(fields)) {
     if (Array.isArray(value)) value.forEach((item) => body.append(key, item));
@@ -64,14 +70,17 @@ async function postForm<T>(url: string, fields: Record<string, string | string[]
   }
   return unwrapApiResponse((await apiClient.post<ApiEnvelope<T>>(url, body, {
     headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    signal: options?.signal,
+    timeout: UPLOAD_TIMEOUT_MS,
   })).data);
 }
 
 export const m1Api = {
-  async previewPictureUrl(url: string): Promise<{ src: string; width: number; height: number }> {
+  async previewPictureUrl(url: string): Promise<{ src: string; width: number; height: number; previewToken: string }> {
     const response = await apiClient.get<Blob>("/pictures/url-preview", {
       params: { url },
       responseType: "blob",
+      timeout: 60_000,
     });
     const src = URL.createObjectURL(response.data);
     try {
@@ -81,7 +90,11 @@ export const m1Api = {
         image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
         image.src = src;
       });
-      return { src, ...dimensions };
+      const previewToken = response.headers["x-teacup-preview-token"];
+      if (typeof previewToken !== "string" || !previewToken) {
+        throw new Error("图片 URL 预览已失效，请重新预览");
+      }
+      return { src, ...dimensions, previewToken };
     } catch (error) {
       URL.revokeObjectURL(src);
       throw error;
@@ -123,16 +136,21 @@ export const m1Api = {
       data.append("introduction", input.description); data.append("category", input.category);
       if (input.spaceId) data.append("spaceId", input.spaceId);
       input.tags.forEach((tag) => data.append("tags", tag));
-      result = unwrapApiResponse((await apiClient.post<ApiEnvelope<ApiPicture>>("/pictures/uploads", data)).data);
+      result = unwrapApiResponse((await apiClient.post<ApiEnvelope<ApiPicture>>("/pictures/uploads", data, {
+        signal: input.signal,
+        timeout: UPLOAD_TIMEOUT_MS,
+        onUploadProgress: (event) => input.onUploadProgress?.({ loaded: event.loaded, total: event.total }),
+      })).data);
     } else {
       result = await postForm<ApiPicture>("/pictures/url-imports", {
         url: input.imageUrl,
+        previewToken: input.previewToken,
         name: input.title,
         introduction: input.description,
         category: input.category,
         tags: input.tags,
         spaceId: input.spaceId,
-      });
+      }, { signal: input.signal });
     }
     return picture(result);
   },

@@ -44,9 +44,12 @@ export interface UploadPictureInput {
   description: string;
   file?: File;
   imageUrl?: string;
+  previewToken?: string;
   category: string;
   tags: string[];
   spaceId?: string;
+  signal?: AbortSignal;
+  onUploadProgress?: (progress: { loaded: number; total?: number }) => void;
 }
 
 export interface RegisterInput {

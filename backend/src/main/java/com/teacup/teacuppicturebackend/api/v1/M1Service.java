@@ -19,6 +19,7 @@ import com.teacup.teacuppicturebackend.service.SpaceService;
 import com.teacup.teacuppicturebackend.service.UserService;
 import com.teacup.teacuppicturebackend.storage.PictureAssetService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
+import com.teacup.teacuppicturebackend.storage.UrlImportPreviewService;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,6 +45,7 @@ public class M1Service {
     private final PublishRequestMapper publishRequestMapper;
     private final UserMapper userMapper;
     private final PictureStorage storage;
+    private final UrlImportPreviewService urlPreviews;
     private final PictureAssetService assets;
     private final SpaceAccessService spaceAccess;
     private final PictureCurrentVersionService currentVersions;
@@ -52,7 +54,8 @@ public class M1Service {
     public M1Service(UserService userService, PersonalSpaceService personalSpaceService, SpaceService spaceService,
                      PictureMapper pictureMapper, PublishRequestMapper publishRequestMapper,
                       UserMapper userMapper, PictureStorage storage, PictureAssetService assets,
-                       SpaceAccessService spaceAccess, PictureCurrentVersionService currentVersions) {
+                       SpaceAccessService spaceAccess, PictureCurrentVersionService currentVersions,
+                       UrlImportPreviewService urlPreviews) {
         this.userService = userService;
         this.personalSpaceService = personalSpaceService;
         this.spaceService = spaceService;
@@ -60,6 +63,7 @@ public class M1Service {
         this.publishRequestMapper = publishRequestMapper;
         this.userMapper = userMapper;
         this.storage = storage;
+        this.urlPreviews = urlPreviews;
         this.assets = assets;
         this.spaceAccess = spaceAccess;
         this.currentVersions = currentVersions;
@@ -70,7 +74,7 @@ public class M1Service {
                      PictureMapper pictureMapper, PublishRequestMapper publishRequestMapper,
                      UserMapper userMapper, PictureStorage storage, PictureAssetService assets) {
         this(userService, personalSpaceService, spaceService, pictureMapper, publishRequestMapper,
-                userMapper, storage, assets, null, null);
+                userMapper, storage, assets, null, null, null);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -139,13 +143,15 @@ public class M1Service {
     public M1Dtos.PictureDetail importUrl(User user, M1Dtos.UrlImportRequest request) {
         if (request == null || request.url() == null || request.url().isBlank()) throw V1Exception.badRequest("图片 URL 不能为空");
         Space space = resolveSpace(user, request.spaceId(), "upload");
-        PictureStorage.StoredPicture stored = storage.importUrl(request.url(), space.getId());
+        PictureStorage.StoredPicture stored = request.previewToken() == null || request.previewToken().isBlank()
+                ? storage.importUrl(request.url(), space.getId())
+                : importPreviewedUrl(user, request, space);
         return savePictureWithCompensation(user, space, stored, request.name(), request.introduction(), request.category(), request.tags());
     }
 
-    public PictureStorage.StoredObject previewUrl(User user, String url) {
+    public UrlImportPreviewService.Preview previewUrl(User user, String url) {
         if (url == null || url.isBlank()) throw V1Exception.badRequest("图片 URL 不能为空");
-        return storage.previewUrl(url.trim());
+        return urlPreviews.preview(user, url.trim());
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -271,6 +277,16 @@ public class M1Service {
             storage.delete(stored.objectKey());
             storage.delete(stored.thumbnailObjectKey());
             throw exception;
+        }
+    }
+
+    private PictureStorage.StoredPicture importPreviewedUrl(User user, M1Dtos.UrlImportRequest request, Space space) {
+        if (urlPreviews == null) throw V1Exception.badRequest("预览已失效，请重新预览图片 URL");
+        try (UrlImportPreviewService.ClaimedPreview preview = urlPreviews.claim(user, request.previewToken(), request.url());
+             java.io.InputStream input = preview.openStream()) {
+            return storage.store(input, preview.fileName(), preview.contentType(), space.getId());
+        } catch (java.io.IOException exception) {
+            throw V1Exception.badRequest("预览已失效，请重新预览图片 URL");
         }
     }
 

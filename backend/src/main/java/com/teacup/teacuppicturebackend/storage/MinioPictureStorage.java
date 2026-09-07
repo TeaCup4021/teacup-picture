@@ -19,7 +19,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FilterInputStream;
@@ -28,7 +27,6 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -229,10 +227,10 @@ public class MinioPictureStorage implements PictureStorage {
             String format;
             format = formatFromFileName(fileName);
             String normalizedFormat = "jpg".equals(format) ? "jpeg" : format;
-            int[] dimensions;
-            try (InputStream input = Files.newInputStream(file)) {
-                dimensions = dimensions(input, normalizedFormat);
-            }
+            PictureImageSupport.DecodedImage decoded = PictureImageSupport.readValidated(file, normalizedFormat);
+            int width = decoded.width();
+            int height = decoded.height();
+            byte[] thumbnail = PictureImageSupport.thumbnailBytes(decoded.image());
             String prefix = "spaces/" + spaceId + "/pictures/" + UUID.randomUUID() + "/";
             objectKey = prefix + "original." + normalizedFormat;
             String thumbnailFormat = "jpeg";
@@ -242,12 +240,11 @@ public class MinioPictureStorage implements PictureStorage {
                 client.putObject(PutObjectArgs.builder().bucket(config.getBucket()).object(objectKey)
                         .contentType(normalizedContentType).stream(input, size, -1).build());
             }
-            byte[] thumbnail = thumbnailBytes(file, normalizedFormat, dimensions[0], dimensions[1]);
             try (InputStream input = new ByteArrayInputStream(thumbnail)) {
                 client.putObject(PutObjectArgs.builder().bucket(config.getBucket()).object(thumbnailObjectKey)
                         .contentType("image/" + thumbnailFormat).stream(input, thumbnail.length, -1).build());
             }
-            return new StoredPicture(objectKey, thumbnailObjectKey, size, dimensions[0], dimensions[1], normalizedFormat,
+            return new StoredPicture(objectKey, thumbnailObjectKey, size, width, height, normalizedFormat,
                     normalizedContentType, checksum(file));
         } catch (V1Exception exception) {
             delete(objectKey);
@@ -261,47 +258,11 @@ public class MinioPictureStorage implements PictureStorage {
         }
     }
 
-    private byte[] thumbnailBytes(Path file, String format, int width, int height) throws IOException {
-        byte[] source = Files.readAllBytes(file);
-        BufferedImage image = ImageIO.read(new ByteArrayInputStream(source));
-        if (image == null) throw new IOException("thumbnail decoder unavailable");
-        int max = Math.max(width, height);
-        int targetWidth = max <= 640 ? width : Math.max(1, width * 640 / max);
-        int targetHeight = max <= 640 ? height : Math.max(1, height * 640 / max);
-        BufferedImage thumbnail = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB);
-        java.awt.Graphics2D graphics = thumbnail.createGraphics();
-        graphics.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        graphics.drawImage(image, 0, 0, targetWidth, targetHeight, null);
-        graphics.dispose();
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        if (!ImageIO.write(thumbnail, "jpeg", output)) throw new IOException("thumbnail encoder unavailable");
-        return output.toByteArray();
-    }
-
     static String formatFromFileName(String fileName) {
         String extension = "";
         if (fileName != null && fileName.contains(".")) extension = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
         if (!FORMATS.contains(extension)) throw unsupported("仅支持 JPEG、PNG 和 WebP");
         return extension;
-    }
-
-    private int[] dimensions(InputStream input, String format) throws IOException {
-        byte[] bytes = input.readAllBytes();
-        if (!"webp".equals(format)) {
-            BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes));
-            if (image == null) throw unsupported("无法解析图片");
-            return new int[]{image.getWidth(), image.getHeight()};
-        }
-        if (bytes.length < 30) throw unsupported("无法解析 WebP 图片");
-        String chunk = new String(bytes, 12, 4, StandardCharsets.US_ASCII);
-        if ("VP8X".equals(chunk)) return new int[]{1 + le24(bytes, 24), 1 + le24(bytes, 27)};
-        if ("VP8L".equals(chunk) && bytes.length >= 25) {
-            int bits = (bytes[21] & 0xff) | ((bytes[22] & 0xff) << 8) | ((bytes[23] & 0xff) << 16) | ((bytes[24] & 0xff) << 24);
-            return new int[]{(bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1};
-        }
-        if ("VP8 ".equals(chunk)) return new int[]{(((bytes[27] & 0xff) << 8) | (bytes[26] & 0xff)) & 0x3fff,
-                (((bytes[29] & 0xff) << 8) | (bytes[28] & 0xff)) & 0x3fff};
-        throw unsupported("无法解析 WebP 图片");
     }
 
     private String checksum(Path file) throws IOException, NoSuchAlgorithmException {
@@ -352,10 +313,6 @@ public class MinioPictureStorage implements PictureStorage {
     private static String fileName(String objectKey) { return objectKey.substring(objectKey.lastIndexOf('/') + 1); }
     private static V1Exception tooLarge() { return new V1Exception(HttpStatus.PAYLOAD_TOO_LARGE, 41300, "图片不能超过 20 MB"); }
     private static V1Exception unsupported(String message) { return new V1Exception(HttpStatus.UNSUPPORTED_MEDIA_TYPE, 41500, message); }
-    private static int le24(byte[] bytes, int offset) {
-        return (bytes[offset] & 0xff) | ((bytes[offset + 1] & 0xff) << 8) | ((bytes[offset + 2] & 0xff) << 16);
-    }
-
     private static final class LimitedInputStream extends FilterInputStream {
         private final long maximum;
         private long count;

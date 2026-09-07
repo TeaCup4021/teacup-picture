@@ -49,7 +49,7 @@ paths:
     post:
       tags: [Auth]
       operationId: login
-       summary: Create a Cookie session for the current browser tab
+      summary: Create a Cookie session for the current browser tab
       requestBody:
         required: true
         content:
@@ -63,7 +63,7 @@ paths:
             X-Request-Id:
               $ref: '#/components/headers/RequestId'
             Set-Cookie:
-               description: HttpOnly TEACUP_SESSION Cookie
+              description: HttpOnly TEACUP_SESSION Cookie
               schema:
                 type: string
           content:
@@ -80,8 +80,8 @@ paths:
     post:
       tags: [Auth]
       operationId: logout
-       summary: Clear the current browser-tab session
-       description: Idempotent even when the session has already expired. Other tab contexts in the same HttpSession remain logged in.
+      summary: Clear the current browser-tab session
+      description: Idempotent even when the session has already expired. Other tab contexts in the same HttpSession remain logged in.
       security:
         - cookieAuth: []
       responses:
@@ -188,6 +188,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/PictureUrlImportRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PictureUrlImportRequest'
       responses:
         '201':
           description: Private picture created
@@ -204,6 +207,44 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+  /pictures/url-preview:
+    get:
+      tags: [Pictures]
+      operationId: previewPictureUrl
+      summary: Download and preview an image URL before importing it
+      description: Returns a JPEG preview and a short-lived, user-bound token. Supplying the token to the URL import endpoint reuses the downloaded original once.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+            pattern: '^https?://'
+      responses:
+        '200':
+          description: JPEG preview; the original image remains server-side until import or token expiry.
+          headers:
+            X-Teacup-Preview-Token:
+              description: Short-lived opaque token bound to the current user and requested URL.
+              schema:
+                type: string
+                format: uuid
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -859,6 +900,10 @@ components:
           type: string
           format: uri
           pattern: '^https?://'
+        previewToken:
+          type: string
+          format: uuid
+          description: Optional token returned by the URL preview endpoint; it is single-use and expires after a short server-side retention period.
         spaceId:
           $ref: '#/components/schemas/Id'
         name:

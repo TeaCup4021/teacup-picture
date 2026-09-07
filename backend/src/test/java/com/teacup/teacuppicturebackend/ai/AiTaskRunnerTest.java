@@ -4,6 +4,7 @@ import com.teacup.teacuppicturebackend.api.v1.M1Service;
 import com.teacup.teacuppicturebackend.mapper.AiTaskMapper;
 import com.teacup.teacuppicturebackend.mapper.PictureMapper;
 import com.teacup.teacuppicturebackend.mapper.UserMapper;
+import com.teacup.teacuppicturebackend.model.entity.AiTask;
 import com.teacup.teacuppicturebackend.service.PersonalSpaceService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
 import org.junit.jupiter.api.BeforeEach;

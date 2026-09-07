@@ -68,10 +68,15 @@ function createApiClient(): AxiosInstance {
     (error: AxiosError) => {
       const body = error.response?.data as
         (Partial<ApiEnvelope<null>> & { errors?: ApiFieldError[] }) | undefined;
+      const fallbackMessage = error.code === "ECONNABORTED"
+        ? "请求超时，请检查网络后重试"
+        : axios.isCancel(error)
+          ? "请求已取消"
+          : "网络请求失败";
 
       throw new ApiError({
         code: body?.code ?? 50000,
-        message: body?.message ?? "网络请求失败",
+        message: body?.message ?? fallbackMessage,
         requestId: body?.requestId ?? error.response?.headers["x-request-id"],
         status: error.response?.status,
         errors: body?.errors,

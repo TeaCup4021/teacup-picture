@@ -16,7 +16,7 @@ public final class M1Dtos {
     public record PersonalSpace(String id, String name, String type, String level, long maxSize,
                                 long maxCount, long totalSize, long totalCount,
                                 List<String> permissions, Instant createdAt, Instant updatedAt) {}
-    public record UrlImportRequest(String url, String spaceId, String name, String introduction,
+    public record UrlImportRequest(String url, String previewToken, String spaceId, String name, String introduction,
                                    String category, List<String> tags) {}
     public record PictureSummary(String id, String spaceId, String thumbnailUrl, String name,
                                  String introduction, String category, List<String> tags, long size,

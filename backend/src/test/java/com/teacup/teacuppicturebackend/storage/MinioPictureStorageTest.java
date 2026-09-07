@@ -20,4 +20,15 @@ class MinioPictureStorageTest {
         assertThrows(V1Exception.class, () -> MinioPictureStorage.formatFromFileName("photo"));
         assertThrows(V1Exception.class, () -> MinioPictureStorage.formatFromFileName("photo.gif"));
     }
+
+    @Test
+    void rejectsImagesThatExceedTheDecodeSafetyLimits() {
+        V1Exception dimension = assertThrows(V1Exception.class,
+                () -> PictureImageSupport.validateDimensions(PictureImageSupport.MAX_DIMENSION + 1, 1));
+        V1Exception pixels = assertThrows(V1Exception.class,
+                () -> PictureImageSupport.validateDimensions(10_000, 10_000));
+
+        assertEquals(41300, dimension.getCode());
+        assertEquals(41300, pixels.getCode());
+    }
 }

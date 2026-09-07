@@ -35,4 +35,29 @@ describe("M1 API adapter", () => {
     expect(apiClient.post).toHaveBeenCalledWith("/pictures/31/publish-requests", undefined);
     expect(submitted).toMatchObject({ id: "31", publishStatus: "pending", reviewRequestId: "41" });
   });
+
+  it("uses a longer timeout and forwards browser upload progress for local images", async () => {
+    vi.mocked(apiClient.post).mockResolvedValue(envelope({
+      id: "31", spaceId: "21", thumbnailUrl: "http://asset/31.png", name: "流程图片",
+      tags: [], width: 10, height: 10, author: { id: "11", name: "测试用户" },
+    }));
+    const signal = new AbortController().signal;
+    const onUploadProgress = vi.fn();
+
+    await m1Api.uploadPicture({
+      title: "流程图片", description: "描述", category: "摄影", tags: [],
+      file: new File(["image"], "photo.png", { type: "image/png" }), signal, onUploadProgress,
+    });
+
+    expect(apiClient.post).toHaveBeenCalledWith(
+      "/pictures/uploads",
+      expect.any(FormData),
+      expect.objectContaining({ signal, timeout: 300_000, onUploadProgress: expect.any(Function) }),
+    );
+    const requestConfig = vi.mocked(apiClient.post).mock.calls[0]?.[2] as {
+      onUploadProgress: (event: { loaded: number; total?: number }) => void;
+    };
+    requestConfig.onUploadProgress({ loaded: 50, total: 100 });
+    expect(onUploadProgress).toHaveBeenCalledWith({ loaded: 50, total: 100 });
+  });
 });

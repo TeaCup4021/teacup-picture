@@ -5,6 +5,7 @@ import com.teacup.teacuppicturebackend.auth.SessionContext;
 import com.teacup.teacuppicturebackend.model.entity.User;
 import com.teacup.teacuppicturebackend.storage.PictureAssetService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
+import com.teacup.teacuppicturebackend.storage.UrlImportPreviewService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -127,6 +128,21 @@ class M1ControllerTest {
         mockMvc.perform(get("/api/v1/pictures/31/content"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", "image/png"))
+                .andExpect(header().string("Content-Length", "3"));
+    }
+
+    @Test
+    void urlPreviewReturnsTheSingleUseImportToken() throws Exception {
+        User user = new User(); user.setId(11L);
+        UrlImportPreviewService.Preview preview = new UrlImportPreviewService.Preview(
+                new org.springframework.core.io.ByteArrayResource(new byte[]{1, 2, 3}), 3, "image/jpeg", "preview-token");
+        when(service.requireUser(any())).thenReturn(user);
+        when(service.previewUrl(user, "https://example.com/photo.jpg")).thenReturn(preview);
+
+        mockMvc.perform(get("/api/v1/pictures/url-preview").param("url", "https://example.com/photo.jpg"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Teacup-Preview-Token", "preview-token"))
+                .andExpect(header().string("Content-Type", "image/jpeg"))
                 .andExpect(header().string("Content-Length", "3"));
     }
 }
