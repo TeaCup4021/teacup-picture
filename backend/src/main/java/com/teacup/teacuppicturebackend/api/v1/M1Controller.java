@@ -81,6 +81,41 @@ public class M1Controller {
         return response(HttpStatus.CREATED, service.upload(user, file, spaceId, name, introduction, category, tags), request);
     }
 
+    @PostMapping("/picture-upload-sessions")
+    public ResponseEntity<V1Response<M1Dtos.UploadSessionView>> createUploadSession(
+            @RequestBody M1Dtos.UploadSessionCreateRequest body, HttpServletRequest request) {
+        return response(HttpStatus.CREATED, service.createUploadSession(service.requireUser(request), body), request);
+    }
+
+    @GetMapping("/picture-upload-sessions/{sessionId}")
+    public ResponseEntity<V1Response<M1Dtos.UploadSessionView>> getUploadSession(
+            @PathVariable String sessionId, HttpServletRequest request) {
+        return response(HttpStatus.OK, service.getUploadSession(service.requireUser(request), parseId(sessionId)), request);
+    }
+
+    @PutMapping(value = "/picture-upload-sessions/{sessionId}/parts/{partNumber}", consumes = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public ResponseEntity<V1Response<M1Dtos.UploadSessionView>> uploadPart(
+            @PathVariable String sessionId, @PathVariable int partNumber,
+            HttpServletRequest request, @RequestHeader(value = "X-Chunk-SHA256", required = false) String checksum) throws java.io.IOException {
+        long size = request.getContentLengthLong();
+        if (size < 0) throw V1Exception.badRequest("缺少分片大小");
+        return response(HttpStatus.OK, service.uploadPart(service.requireUser(request), parseId(sessionId), partNumber,
+                request.getInputStream(), size, checksum), request);
+    }
+
+    @PostMapping("/picture-upload-sessions/{sessionId}/complete")
+    public ResponseEntity<V1Response<M1Dtos.PictureDetail>> completeUploadSession(
+            @PathVariable String sessionId, @RequestBody(required = false) M1Dtos.UploadSessionCreateRequest body,
+            HttpServletRequest request) {
+        return response(HttpStatus.CREATED, service.completeUploadSession(service.requireUser(request), parseId(sessionId), body), request);
+    }
+
+    @DeleteMapping("/picture-upload-sessions/{sessionId}")
+    public ResponseEntity<V1Response<Boolean>> abortUploadSession(@PathVariable String sessionId, HttpServletRequest request) {
+        service.abortUploadSession(service.requireUser(request), parseId(sessionId));
+        return response(HttpStatus.OK, true, request);
+    }
+
     @PostMapping("/pictures/url-imports")
     public ResponseEntity<V1Response<M1Dtos.PictureDetail>> importUrl(@RequestBody M1Dtos.UrlImportRequest body,
                                                                       HttpServletRequest request) {

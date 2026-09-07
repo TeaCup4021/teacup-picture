@@ -48,4 +48,9 @@ public final class M1Dtos {
     public record PublishRequestPage(List<PublishRequestView> items, PageMeta page) {}
     public record PublicPictureCursorPage(List<PublicPictureSummary> items, String nextCursor,
                                           boolean hasMore) {}
+    public record UploadSessionCreateRequest(String fileName, String contentType, long totalSize,
+                                             Integer chunkSize, String fileChecksum, String spaceId,
+                                             String name, String introduction, String category, List<String> tags) {}
+    public record UploadSessionView(String id, int chunkSize, int totalParts, long totalSize,
+                                    List<Integer> uploadedParts, Instant expiresAt, String status) {}
 }

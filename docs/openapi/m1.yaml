@@ -15,6 +15,7 @@ tags:
   - name: Auth
   - name: Personal space
   - name: Pictures
+  - name: Resumable uploads
   - name: Publish review
   - name: Public gallery
 paths:
@@ -175,6 +176,122 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
+  /picture-upload-sessions:
+    post:
+      tags: [Resumable uploads]
+      operationId: createPictureUploadSession
+      summary: Create a resumable picture upload session
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadSessionCreateRequest'
+      responses:
+        '201':
+          description: Upload session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSessionResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+  /picture-upload-sessions/{sessionId}:
+    parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Resumable uploads]
+      operationId: getPictureUploadSession
+      summary: Get upload progress and uploaded part numbers
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200':
+          description: Upload progress
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadSessionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Resumable uploads]
+      operationId: abortPictureUploadSession
+      summary: Abort an upload session
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200':
+          description: Upload session aborted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BooleanResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /picture-upload-sessions/{sessionId}/parts/{partNumber}:
+    put:
+      tags: [Resumable uploads]
+      operationId: uploadPicturePart
+      summary: Upload one binary part
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: partNumber
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: X-Chunk-SHA256
+          in: header
+          required: false
+          schema: { type: string, pattern: '^[a-fA-F0-9]{64}$' }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: Updated upload progress
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadSessionResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /picture-upload-sessions/{sessionId}/complete:
+    post:
+      tags: [Resumable uploads]
+      operationId: completePictureUploadSession
+      summary: Validate all parts and create a private picture
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UploadSessionMetadata' }
+      responses:
+        '201':
+          description: Private picture created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PictureDetailResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /pictures/url-imports:
     post:
       tags: [Pictures]
@@ -891,6 +1008,62 @@ components:
             type: string
             minLength: 1
             maxLength: 32
+    UploadSessionCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [fileName, totalSize]
+      properties:
+        fileName: { type: string, minLength: 1, maxLength: 255 }
+        contentType: { type: string, maxLength: 100 }
+        totalSize: { type: integer, minimum: 1, maximum: 20971520 }
+        chunkSize: { type: integer, enum: [5242880] }
+        fileChecksum: { type: string, pattern: '^[a-fA-F0-9]{64}$' }
+        spaceId: { $ref: '#/components/schemas/Id' }
+        name: { type: string, maxLength: 80 }
+        introduction: { type: string, maxLength: 300 }
+        category: { type: string, maxLength: 80 }
+        tags:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 32 }
+    UploadSessionMetadata:
+      type: object
+      additionalProperties: false
+      properties:
+        fileName: { type: string, maxLength: 255 }
+        contentType: { type: string, maxLength: 100 }
+        totalSize: { type: integer, minimum: 1, maximum: 20971520 }
+        chunkSize: { type: integer, enum: [5242880] }
+        totalParts: { type: integer, minimum: 1, maximum: 4 }
+        spaceId: { $ref: '#/components/schemas/Id' }
+        name: { type: string, maxLength: 80 }
+        introduction: { type: string, maxLength: 300 }
+        category: { type: string, maxLength: 80 }
+        tags:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 32 }
+    UploadSession:
+      type: object
+      required: [id, chunkSize, totalParts, totalSize, uploadedParts, expiresAt, status]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        chunkSize: { type: integer, example: 5242880 }
+        totalParts: { type: integer, minimum: 1 }
+        totalSize: { type: integer, minimum: 1 }
+        uploadedParts:
+          type: array
+          items: { type: integer, minimum: 1 }
+        expiresAt: { $ref: '#/components/schemas/Timestamp' }
+        status: { type: string, enum: [active, completed, aborted, expired, failed] }
+    UploadSessionResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/UploadSession' }
     PictureUrlImportRequest:
       type: object
       additionalProperties: false

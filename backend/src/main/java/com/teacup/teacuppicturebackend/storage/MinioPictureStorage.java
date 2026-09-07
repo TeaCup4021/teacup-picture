@@ -4,6 +4,8 @@ import com.teacup.teacuppicturebackend.api.v1.V1Exception;
 import com.teacup.teacuppicturebackend.config.PictureStorageConfig;
 import io.minio.GetObjectArgs;
 import io.minio.GetObjectResponse;
+import io.minio.ComposeObjectArgs;
+import io.minio.ComposeSource;
 import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
@@ -34,11 +36,12 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Set;
+import java.util.List;
 import java.util.UUID;
 
 @Slf4j
 @Component
-public class MinioPictureStorage implements PictureStorage {
+public class MinioPictureStorage implements PictureStorage, ResumablePictureStorage {
     private static final long MAX_BYTES = 20L * 1024 * 1024;
     private static final Set<String> FORMATS = Set.of("jpeg", "jpg", "png", "webp");
 
@@ -218,6 +221,77 @@ public class MinioPictureStorage implements PictureStorage {
         }
     }
 
+    @Override
+    public String createUpload(long spaceId) {
+        if (spaceId <= 0) throw V1Exception.badRequest("空间无效");
+        return "upload-sessions/" + UUID.randomUUID() + "/";
+    }
+
+    @Override
+    public String uploadPart(String storagePrefix, int partNumber, InputStream input, long size, String checksum) {
+        validateUploadPrefix(storagePrefix);
+        if (partNumber < 1 || size < 1 || size > 5L * 1024 * 1024) throw V1Exception.badRequest("分片参数无效");
+        String objectKey = storagePrefix + "part-" + partNumber;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream source = new java.security.DigestInputStream(new LimitedInputStream(input, 5L * 1024 * 1024), digest)) {
+                client.putObject(PutObjectArgs.builder().bucket(config.getBucket()).object(objectKey)
+                        .contentType("application/octet-stream").stream(source, size, -1).build());
+            }
+            String actual = HexFormat.of().formatHex(digest.digest());
+            if (checksum != null && !checksum.isBlank() && !actual.equalsIgnoreCase(checksum)) {
+                delete(objectKey);
+                throw V1Exception.badRequest("分片校验失败");
+            }
+            return actual;
+        } catch (V1Exception exception) {
+            throw exception;
+        } catch (Exception exception) {
+            delete(objectKey);
+            log.error("Unable to store resumable upload part", exception);
+            throw new V1Exception(HttpStatus.SERVICE_UNAVAILABLE, 50300, "图片存储暂不可用");
+        }
+    }
+
+    @Override
+    public StoredPicture completeUpload(String storagePrefix, List<ResumablePictureStorage.Part> parts,
+                                        String fileName, String contentType, long spaceId) {
+        validateUploadPrefix(storagePrefix);
+        if (parts == null || parts.isEmpty()) throw V1Exception.badRequest("上传分片不能为空");
+        String assembledKey = storagePrefix + "assembled";
+        try {
+            List<ComposeSource> sources = parts.stream()
+                    .map(part -> ComposeSource.builder().bucket(config.getBucket())
+                            .object(storagePrefix + "part-" + part.partNumber()).build())
+                    .toList();
+            client.composeObject(ComposeObjectArgs.builder().bucket(config.getBucket()).object(assembledKey)
+                    .sources(sources).build());
+            try (GetObjectResponse input = client.getObject(GetObjectArgs.builder()
+                    .bucket(config.getBucket()).object(assembledKey).build())) {
+                return store(input, fileName, contentType, spaceId);
+            }
+        } catch (V1Exception exception) {
+            throw exception;
+        } catch (Exception exception) {
+            log.error("Unable to complete resumable upload", exception);
+            throw new V1Exception(HttpStatus.SERVICE_UNAVAILABLE, 50300, "图片存储暂不可用");
+        } finally {
+            delete(assembledKey);
+            abortUpload(storagePrefix, parts.stream().map(ResumablePictureStorage.Part::partNumber).toList());
+        }
+    }
+
+    @Override
+    public void abortUpload(String storagePrefix, List<Integer> partNumbers) {
+        validateUploadPrefix(storagePrefix);
+        if (partNumbers != null) {
+            for (Integer partNumber : partNumbers) {
+                if (partNumber != null && partNumber > 0) delete(storagePrefix + "part-" + partNumber);
+            }
+        }
+        delete(storagePrefix + "assembled");
+    }
+
     private StoredPicture validateAndUpload(Path file, String fileName, long spaceId) {
         String objectKey = null;
         String thumbnailObjectKey = null;
@@ -289,7 +363,8 @@ public class MinioPictureStorage implements PictureStorage {
     }
 
     private void validateObjectKey(String objectKey) {
-        if (objectKey == null || !objectKey.matches("spaces/[0-9]+/pictures/[a-f0-9-]+/(original|thumbnail)\\.(jpeg|png|webp)")) {
+        if (objectKey == null || !(objectKey.matches("spaces/[0-9]+/pictures/[a-f0-9-]+/(original|thumbnail)\\.(jpeg|png|webp)")
+                || objectKey.matches("upload-sessions/[a-f0-9-]+/(part-[0-9]+|assembled)"))) {
             throw V1Exception.notFound();
         }
     }
@@ -311,6 +386,9 @@ public class MinioPictureStorage implements PictureStorage {
     }
 
     private static String fileName(String objectKey) { return objectKey.substring(objectKey.lastIndexOf('/') + 1); }
+    private static void validateUploadPrefix(String prefix) {
+        if (prefix == null || !prefix.matches("upload-sessions/[a-f0-9-]+/")) throw V1Exception.notFound();
+    }
     private static V1Exception tooLarge() { return new V1Exception(HttpStatus.PAYLOAD_TOO_LARGE, 41300, "图片不能超过 20 MB"); }
     private static V1Exception unsupported(String message) { return new V1Exception(HttpStatus.UNSUPPORTED_MEDIA_TYPE, 41500, message); }
     private static final class LimitedInputStream extends FilterInputStream {

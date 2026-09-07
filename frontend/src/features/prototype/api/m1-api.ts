@@ -8,6 +8,8 @@ import type {
 } from "@/features/prototype/model/types";
 
 const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+const RESUMABLE_THRESHOLD = 8 * 1024 * 1024;
+const RESUMABLE_CHUNK_SIZE = 5 * 1024 * 1024;
 
 interface ApiUser { id: string; account: string; name: string; role: "user" | "admin" }
 interface ApiAuthor { id: string; name: string }
@@ -20,6 +22,15 @@ interface ApiPicture {
 }
 interface ApiPublishRequest { id: string; picture: ApiPicture; decisionReason?: string | null }
 interface ApiPage<T> { items: T[] }
+interface UploadSession {
+  id: string;
+  chunkSize: number;
+  totalParts: number;
+  totalSize: number;
+  uploadedParts: number[];
+  expiresAt: string;
+  status: string;
+}
 
 function user(value: ApiUser): PrototypeUser {
   return { id: value.id, account: value.account, displayName: value.name, role: value.role, avatarText: value.name.slice(0, 1) };
@@ -132,6 +143,10 @@ export const m1Api = {
   async uploadPicture(input: UploadPictureInput): Promise<PrototypePicture> {
     let result: ApiPicture;
     if (input.file) {
+      if (input.file.size > RESUMABLE_THRESHOLD) {
+        result = await resumableUpload(input);
+        return picture(result);
+      }
       const data = new FormData(); data.append("file", input.file); data.append("name", input.title);
       data.append("introduction", input.description); data.append("category", input.category);
       if (input.spaceId) data.append("spaceId", input.spaceId);
@@ -170,3 +185,72 @@ export const m1Api = {
     return picture(result.picture, result.id);
   },
 };
+
+async function sha256(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function resumableUpload(input: UploadPictureInput): Promise<ApiPicture> {
+  const file = input.file;
+  if (!file) throw new Error("请选择图片文件");
+  const fingerprint = `${file.name}:${file.size}:${file.lastModified}`;
+  const resumeKey = `teacup-upload:${fingerprint}`;
+  let session: UploadSession;
+  try {
+    const cached = typeof window !== "undefined" ? window.sessionStorage.getItem(resumeKey) : null;
+    session = cached ? JSON.parse(cached) as UploadSession : await createUploadSession(input, file);
+    if (session.status !== "active") throw new Error("上传会话已结束");
+    const current = await get<UploadSession>(`/picture-upload-sessions/${session.id}`);
+    session = current;
+  } catch {
+    session = await createUploadSession(input, file);
+  }
+  if (typeof window !== "undefined") window.sessionStorage.setItem(resumeKey, JSON.stringify(session));
+  try {
+    const uploaded = new Set(session.uploadedParts);
+    const totalParts = Math.ceil(file.size / session.chunkSize);
+    for (let partNumber = 1; partNumber <= totalParts; partNumber += 1) {
+      if (uploaded.has(partNumber)) {
+        input.onUploadProgress?.({ loaded: Math.min(file.size, partNumber * session.chunkSize), total: file.size });
+        continue;
+      }
+      const start = (partNumber - 1) * session.chunkSize;
+      const chunk = file.slice(start, Math.min(file.size, start + session.chunkSize));
+      const checksum = await sha256(chunk);
+      const response = await apiClient.put<ApiEnvelope<UploadSession>>(
+        `/picture-upload-sessions/${session.id}/parts/${partNumber}`, chunk,
+        { signal: input.signal, timeout: UPLOAD_TIMEOUT_MS, headers: { "Content-Type": "application/octet-stream", "X-Chunk-SHA256": checksum } },
+      );
+      session = unwrapApiResponse(response.data);
+      uploaded.add(partNumber);
+      input.onUploadProgress?.({ loaded: Math.min(file.size, partNumber * session.chunkSize), total: file.size });
+      if (typeof window !== "undefined") window.sessionStorage.setItem(resumeKey, JSON.stringify(session));
+    }
+    const result = unwrapApiResponse((await apiClient.post<ApiEnvelope<ApiPicture>>(
+      `/picture-upload-sessions/${session.id}/complete`, {
+        fileName: file.name, contentType: file.type, totalSize: file.size, chunkSize: session.chunkSize,
+        totalParts, spaceId: input.spaceId, name: input.title, introduction: input.description,
+        category: input.category, tags: input.tags,
+      }, { signal: input.signal, timeout: UPLOAD_TIMEOUT_MS },
+    )).data);
+    if (typeof window !== "undefined") window.sessionStorage.removeItem(resumeKey);
+    input.onUploadProgress?.({ loaded: file.size, total: file.size });
+    return result;
+  } catch (error) {
+    if (input.signal?.aborted) {
+      await apiClient.delete(`/picture-upload-sessions/${session.id}`).catch(() => undefined);
+      if (typeof window !== "undefined") window.sessionStorage.removeItem(resumeKey);
+    }
+    throw error;
+  }
+}
+
+async function createUploadSession(input: UploadPictureInput, file: File): Promise<UploadSession> {
+  return post<UploadSession>("/picture-upload-sessions", {
+    fileName: file.name, contentType: file.type, totalSize: file.size,
+    chunkSize: RESUMABLE_CHUNK_SIZE, spaceId: input.spaceId,
+    name: input.title, introduction: input.description, category: input.category, tags: input.tags,
+  });
+}

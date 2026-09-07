@@ -9,16 +9,21 @@ import com.teacup.teacuppicturebackend.auth.SessionContext;
 import com.teacup.teacuppicturebackend.mapper.PictureMapper;
 import com.teacup.teacuppicturebackend.mapper.PublishRequestMapper;
 import com.teacup.teacuppicturebackend.mapper.UserMapper;
+import com.teacup.teacuppicturebackend.mapper.PictureUploadPartMapper;
+import com.teacup.teacuppicturebackend.mapper.PictureUploadSessionMapper;
 import com.teacup.teacuppicturebackend.model.dto.user.UserRegisterRequest;
 import com.teacup.teacuppicturebackend.model.entity.Picture;
 import com.teacup.teacuppicturebackend.model.entity.PublishRequest;
 import com.teacup.teacuppicturebackend.model.entity.Space;
 import com.teacup.teacuppicturebackend.model.entity.User;
+import com.teacup.teacuppicturebackend.model.entity.PictureUploadPart;
+import com.teacup.teacuppicturebackend.model.entity.PictureUploadSession;
 import com.teacup.teacuppicturebackend.service.PersonalSpaceService;
 import com.teacup.teacuppicturebackend.service.SpaceService;
 import com.teacup.teacuppicturebackend.service.UserService;
 import com.teacup.teacuppicturebackend.storage.PictureAssetService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
+import com.teacup.teacuppicturebackend.storage.ResumablePictureStorage;
 import com.teacup.teacuppicturebackend.storage.UrlImportPreviewService;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,6 +39,12 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.springframework.scheduling.annotation.Scheduled;
 
 @Service
 public class M1Service {
@@ -49,13 +60,17 @@ public class M1Service {
     private final PictureAssetService assets;
     private final SpaceAccessService spaceAccess;
     private final PictureCurrentVersionService currentVersions;
+    private final PictureUploadSessionMapper uploadSessionMapper;
+    private final PictureUploadPartMapper uploadPartMapper;
+    private final ResumablePictureStorage resumableStorage;
 
     @Autowired
     public M1Service(UserService userService, PersonalSpaceService personalSpaceService, SpaceService spaceService,
                      PictureMapper pictureMapper, PublishRequestMapper publishRequestMapper,
                       UserMapper userMapper, PictureStorage storage, PictureAssetService assets,
                        SpaceAccessService spaceAccess, PictureCurrentVersionService currentVersions,
-                       UrlImportPreviewService urlPreviews) {
+                       UrlImportPreviewService urlPreviews, PictureUploadSessionMapper uploadSessionMapper,
+                       PictureUploadPartMapper uploadPartMapper, ResumablePictureStorage resumableStorage) {
         this.userService = userService;
         this.personalSpaceService = personalSpaceService;
         this.spaceService = spaceService;
@@ -67,6 +82,19 @@ public class M1Service {
         this.assets = assets;
         this.spaceAccess = spaceAccess;
         this.currentVersions = currentVersions;
+        this.uploadSessionMapper = uploadSessionMapper;
+        this.uploadPartMapper = uploadPartMapper;
+        this.resumableStorage = resumableStorage;
+    }
+
+    /** Kept for pre-M4 focused unit tests; runtime injection uses SpaceAccessService. */
+    public M1Service(UserService userService, PersonalSpaceService personalSpaceService, SpaceService spaceService,
+                     PictureMapper pictureMapper, PublishRequestMapper publishRequestMapper,
+                     UserMapper userMapper, PictureStorage storage, PictureAssetService assets,
+                     SpaceAccessService spaceAccess, PictureCurrentVersionService currentVersions,
+                     UrlImportPreviewService urlPreviews) {
+        this(userService, personalSpaceService, spaceService, pictureMapper, publishRequestMapper,
+                userMapper, storage, assets, spaceAccess, currentVersions, urlPreviews, null, null, null);
     }
 
     /** Kept for pre-M4 focused unit tests; runtime injection uses SpaceAccessService. */
@@ -74,7 +102,119 @@ public class M1Service {
                      PictureMapper pictureMapper, PublishRequestMapper publishRequestMapper,
                      UserMapper userMapper, PictureStorage storage, PictureAssetService assets) {
         this(userService, personalSpaceService, spaceService, pictureMapper, publishRequestMapper,
-                userMapper, storage, assets, null, null, null);
+                userMapper, storage, assets, null, null, null, null, null, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public M1Dtos.UploadSessionView createUploadSession(User user, M1Dtos.UploadSessionCreateRequest request) {
+        if (resumableStorage == null || uploadSessionMapper == null || uploadPartMapper == null) {
+            throw V1Exception.serviceUnavailable("分片上传暂不可用");
+        }
+        if (request == null || request.fileName() == null || request.fileName().isBlank()) throw V1Exception.badRequest("文件名不能为空");
+        if (request.totalSize() < 1 || request.totalSize() > 20L * 1024 * 1024) throw new V1Exception(org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE, 41300, "图片不能超过 20 MB");
+        int chunkSize = request.chunkSize() == null ? 5 * 1024 * 1024 : request.chunkSize();
+        if (chunkSize != 5 * 1024 * 1024) throw V1Exception.badRequest("分片大小必须为 5 MiB");
+        int totalParts = (int) ((request.totalSize() + chunkSize - 1) / chunkSize);
+        if (totalParts < 1 || totalParts > 10000) throw V1Exception.badRequest("分片数量无效");
+        Space space = resolveSpace(user, request.spaceId(), "upload");
+        if (space.getTotalCount() >= space.getMaxCount() || space.getTotalSize() + request.totalSize() > space.getMaxSize()) {
+            throw V1Exception.conflict("个人空间容量不足");
+        }
+        PictureUploadSession session = new PictureUploadSession();
+        session.setUserId(user.getId()); session.setSpaceId(space.getId());
+        session.setStoragePrefix(resumableStorage.createUpload(space.getId()));
+        session.setFileName(request.fileName().trim()); session.setContentType(request.contentType());
+        session.setName(blankToNull(request.name())); session.setIntroduction(blankToNull(request.introduction()));
+        session.setCategory(blankToNull(request.category())); session.setTags(JSONUtil.toJsonStr(request.tags() == null ? List.of() : request.tags()));
+        session.setTotalSize(request.totalSize()); session.setChunkSize(chunkSize); session.setTotalParts(totalParts);
+        session.setFileChecksum(blankToNull(request.fileChecksum())); session.setStatus("active");
+        session.setExpiresAt(LocalDateTime.now().plusHours(24));
+        uploadSessionMapper.insert(session);
+        return uploadSessionView(session, List.of());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public M1Dtos.UploadSessionView uploadPart(User user, long sessionId, int partNumber,
+                                               java.io.InputStream input, long size, String checksum) {
+        PictureUploadSession session = requireUploadSession(user, sessionId);
+        if (partNumber < 1 || partNumber > session.getTotalParts()) throw V1Exception.badRequest("分片序号无效");
+        long expectedSize = partNumber == session.getTotalParts()
+                ? session.getTotalSize() - (long) session.getChunkSize() * (session.getTotalParts() - 1)
+                : session.getChunkSize();
+        if (size != expectedSize) throw V1Exception.badRequest("分片大小不匹配");
+        PictureUploadPart existing = uploadPartMapper.selectOne(new LambdaQueryWrapper<PictureUploadPart>()
+                .eq(PictureUploadPart::getSessionId, sessionId).eq(PictureUploadPart::getPartNumber, partNumber));
+        if (existing != null) {
+            if (existing.getSize() == size && (checksum == null || checksum.isBlank() || checksum.equalsIgnoreCase(existing.getChecksum()))) {
+                return uploadSessionView(session, uploadPartMapper.selectBySessionId(sessionId).stream().map(PictureUploadPart::getPartNumber).toList());
+            }
+            throw V1Exception.conflict("分片已存在且内容不一致");
+        }
+        String actualChecksum = resumableStorage.uploadPart(session.getStoragePrefix(), partNumber, input, size, checksum);
+        PictureUploadPart part = new PictureUploadPart(); part.setSessionId(sessionId); part.setPartNumber(partNumber);
+        part.setEtag(actualChecksum); part.setSize(size); part.setChecksum(actualChecksum); uploadPartMapper.insert(part);
+        return uploadSessionView(session, uploadPartMapper.selectBySessionId(sessionId).stream().map(PictureUploadPart::getPartNumber).toList());
+    }
+
+    public M1Dtos.UploadSessionView getUploadSession(User user, long sessionId) {
+        PictureUploadSession session = requireUploadSession(user, sessionId);
+        return uploadSessionView(session, uploadPartMapper.selectBySessionId(sessionId).stream().map(PictureUploadPart::getPartNumber).toList());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public M1Dtos.PictureDetail completeUploadSession(User user, long sessionId, M1Dtos.UploadSessionCreateRequest metadata) {
+        PictureUploadSession session = requireUploadSession(user, sessionId);
+        List<PictureUploadPart> rows = uploadPartMapper.selectBySessionId(sessionId);
+        if (rows.size() != session.getTotalParts()) throw V1Exception.conflict("仍有分片未上传");
+        for (int i = 0; i < rows.size(); i++) if (rows.get(i).getPartNumber() != i + 1) throw V1Exception.conflict("分片序号不完整");
+        List<ResumablePictureStorage.Part> parts = rows.stream().map(p -> new ResumablePictureStorage.Part(p.getPartNumber(), p.getEtag(), p.getSize())).toList();
+        PictureStorage.StoredPicture stored = resumableStorage.completeUpload(session.getStoragePrefix(), parts, session.getFileName(), session.getContentType(), session.getSpaceId());
+        Space space = resolveSpace(user, Long.toString(session.getSpaceId()), "upload");
+        M1Dtos.PictureDetail detail;
+        try {
+            detail = savePictureWithCompensation(user, space, stored,
+                    metadata == null || metadata.name() == null ? (session.getName() == null ? session.getFileName() : session.getName()) : metadata.name(),
+                    metadata == null ? session.getIntroduction() : metadata.introduction(),
+                    metadata == null ? session.getCategory() : metadata.category(),
+                    metadata == null ? (session.getTags() == null ? List.of() : JSONUtil.toList(session.getTags(), String.class)) : metadata.tags());
+            session.setStatus("completed"); session.setCompletedPictureId(Long.parseLong(detail.id())); uploadSessionMapper.updateById(session);
+            return detail;
+        } catch (RuntimeException exception) {
+            session.setStatus("failed"); uploadSessionMapper.updateById(session);
+            throw exception;
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void abortUploadSession(User user, long sessionId) {
+        PictureUploadSession session = requireUploadSession(user, sessionId);
+        List<PictureUploadPart> parts = uploadPartMapper.selectBySessionId(sessionId);
+        resumableStorage.abortUpload(session.getStoragePrefix(), parts.stream().map(PictureUploadPart::getPartNumber).toList());
+        session.setStatus("aborted"); uploadSessionMapper.updateById(session);
+    }
+
+    @Scheduled(fixedDelay = 60 * 60 * 1000L)
+    @Transactional(rollbackFor = Exception.class)
+    public void cleanupExpiredUploadSessions() {
+        if (uploadSessionMapper == null || uploadPartMapper == null || resumableStorage == null) return;
+        for (PictureUploadSession session : uploadSessionMapper.selectExpiredActive()) {
+            List<PictureUploadPart> parts = uploadPartMapper.selectBySessionId(session.getId());
+            resumableStorage.abortUpload(session.getStoragePrefix(), parts.stream().map(PictureUploadPart::getPartNumber).toList());
+            session.setStatus("expired"); uploadSessionMapper.updateById(session);
+        }
+    }
+
+    private PictureUploadSession requireUploadSession(User user, long sessionId) {
+        PictureUploadSession session = uploadSessionMapper == null ? null : uploadSessionMapper.selectById(sessionId);
+        if (session == null || !Objects.equals(session.getUserId(), user.getId())) throw V1Exception.notFound();
+        if (!"active".equals(session.getStatus())) throw V1Exception.conflict("上传会话已结束");
+        if (session.getExpiresAt() == null || session.getExpiresAt().isBefore(LocalDateTime.now())) throw V1Exception.conflict("上传会话已过期");
+        return session;
+    }
+
+    private M1Dtos.UploadSessionView uploadSessionView(PictureUploadSession session, List<Integer> uploadedParts) {
+        return new M1Dtos.UploadSessionView(Long.toString(session.getId()), session.getChunkSize(), session.getTotalParts(),
+                session.getTotalSize(), uploadedParts.stream().sorted().toList(), session.getExpiresAt().toInstant(java.time.ZoneOffset.UTC), session.getStatus());
     }
 
     @Transactional(rollbackFor = Exception.class)
