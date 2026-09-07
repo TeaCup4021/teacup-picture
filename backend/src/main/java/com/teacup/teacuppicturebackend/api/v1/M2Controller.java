@@ -49,6 +49,9 @@ public class M2Controller {
         return response(result.created() ? HttpStatus.CREATED : HttpStatus.OK, result.task(), request);
     }
 
+
+
+
     @GetMapping("/ai/tasks")
     public ResponseEntity<V1Response<M2Dtos.AiTaskPage>> list(
             @RequestParam(defaultValue = "1") int page,
@@ -58,17 +61,23 @@ public class M2Controller {
         return response(HttpStatus.OK, tasks.list(auth.requireUser(request), page, pageSize, status), request);
     }
 
+
+
     @GetMapping("/ai/tasks/{taskId}")
     public ResponseEntity<V1Response<M2Dtos.AiTaskView>> get(@PathVariable String taskId,
                                                               HttpServletRequest request) {
         return response(HttpStatus.OK, tasks.get(auth.requireUser(request), parseId(taskId)), request);
     }
 
+
+
     @PostMapping("/ai/tasks/{taskId}/cancel")
     public ResponseEntity<V1Response<M2Dtos.AiTaskView>> cancel(@PathVariable String taskId,
                                                                  HttpServletRequest request) {
         return response(HttpStatus.OK, tasks.cancel(auth.requireUser(request), parseId(taskId)), request);
     }
+
+
 
     @GetMapping("/ai/tasks/{taskId}/download")
     public ResponseEntity<Resource> download(@PathVariable String taskId, HttpServletRequest request) {
