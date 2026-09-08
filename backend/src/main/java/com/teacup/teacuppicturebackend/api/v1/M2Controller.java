@@ -52,14 +52,19 @@ public class M2Controller {
 
 
 
+
+
     @GetMapping("/ai/tasks")
     public ResponseEntity<V1Response<M2Dtos.AiTaskPage>> list(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize,
             @RequestParam(required = false) String status,
             HttpServletRequest request) {
+
         return response(HttpStatus.OK, tasks.list(auth.requireUser(request), page, pageSize, status), request);
+        
     }
+
 
 
 
