@@ -27,8 +27,16 @@ import com.teacup.teacuppicturebackend.storage.ResumablePictureStorage;
 import com.teacup.teacuppicturebackend.storage.UrlImportPreviewService;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.benmanes.caffeine.cache.Cache;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import javax.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
@@ -44,6 +52,9 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
 import org.springframework.scheduling.annotation.Scheduled;
 
 @Service
@@ -63,6 +74,14 @@ public class M1Service {
     private final PictureUploadSessionMapper uploadSessionMapper;
     private final PictureUploadPartMapper uploadPartMapper;
     private final ResumablePictureStorage resumableStorage;
+    private final Cache<String, String> publicPictureListLocalCache;
+    private final Cache<String, String> publicPictureDetailLocalCache;
+    private final StringRedisTemplate redis;
+    private final RedissonClient redisson;
+    private final ObjectMapper objectMapper;
+
+    private static final String PUBLIC_CACHE_VERSION_KEY = "teacup:v1:public-picture-cache:version";
+    private static final String PUBLIC_CACHE_PREFIX = "teacup:v1:public-picture-cache:";
 
     @Autowired
     public M1Service(UserService userService, PersonalSpaceService personalSpaceService, SpaceService spaceService,
@@ -70,7 +89,10 @@ public class M1Service {
                       UserMapper userMapper, PictureStorage storage, PictureAssetService assets,
                        SpaceAccessService spaceAccess, PictureCurrentVersionService currentVersions,
                        UrlImportPreviewService urlPreviews, PictureUploadSessionMapper uploadSessionMapper,
-                       PictureUploadPartMapper uploadPartMapper, ResumablePictureStorage resumableStorage) {
+                       PictureUploadPartMapper uploadPartMapper, ResumablePictureStorage resumableStorage,
+                       @Qualifier("publicPictureListLocalCache") Cache<String, String> publicPictureListLocalCache,
+                       @Qualifier("publicPictureDetailLocalCache") Cache<String, String> publicPictureDetailLocalCache,
+                       StringRedisTemplate redis, RedissonClient redisson, ObjectMapper objectMapper) {
         this.userService = userService;
         this.personalSpaceService = personalSpaceService;
         this.spaceService = spaceService;
@@ -85,6 +107,11 @@ public class M1Service {
         this.uploadSessionMapper = uploadSessionMapper;
         this.uploadPartMapper = uploadPartMapper;
         this.resumableStorage = resumableStorage;
+        this.publicPictureListLocalCache = publicPictureListLocalCache;
+        this.publicPictureDetailLocalCache = publicPictureDetailLocalCache;
+        this.redis = redis;
+        this.redisson = redisson;
+        this.objectMapper = objectMapper;
     }
 
     /** Kept for pre-M4 focused unit tests; runtime injection uses SpaceAccessService. */
@@ -94,7 +121,8 @@ public class M1Service {
                      SpaceAccessService spaceAccess, PictureCurrentVersionService currentVersions,
                      UrlImportPreviewService urlPreviews) {
         this(userService, personalSpaceService, spaceService, pictureMapper, publishRequestMapper,
-                userMapper, storage, assets, spaceAccess, currentVersions, urlPreviews, null, null, null);
+                userMapper, storage, assets, spaceAccess, currentVersions, urlPreviews, null, null, null,
+                null, null, null, null, null);
     }
 
     /** Kept for pre-M4 focused unit tests; runtime injection uses SpaceAccessService. */
@@ -102,7 +130,8 @@ public class M1Service {
                      PictureMapper pictureMapper, PublishRequestMapper publishRequestMapper,
                      UserMapper userMapper, PictureStorage storage, PictureAssetService assets) {
         this(userService, personalSpaceService, spaceService, pictureMapper, publishRequestMapper,
-                userMapper, storage, assets, null, null, null, null, null, null);
+                userMapper, storage, assets, null, null, null, null, null, null,
+                null, null, null, null, null);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -367,6 +396,7 @@ public class M1Service {
         picture.setPublishedAt(approve ? new Date() : null); picture.setReviewerId(admin.getId());
         picture.setReviewMessage(blankToNull(reason)); picture.setReviewTime(new Date()); picture.setReviewStatus(approve ? 1 : 2);
         pictureMapper.updateById(picture);
+        invalidatePublicPictureCacheAfterCommit();
         return publishView(request, picture, userMapper.selectById(request.getRequesterId()), admin);
     }
 
@@ -385,11 +415,24 @@ public class M1Service {
         picture.setPublishStatus("withdrawn"); picture.setVisibility("private"); picture.setPublishedAt(null);
         picture.setReviewerId(admin.getId()); picture.setReviewMessage(reason); picture.setReviewTime(new Date());
         pictureMapper.updateById(picture);
+        invalidatePublicPictureCacheAfterCommit();
         return detail(picture, userMapper.selectById(picture.getUserId()));
     }
 
     public M1Dtos.PublicPictureCursorPage publicPictures(String cursor, int limit) {
         if (limit < 1 || limit > 50) throw V1Exception.badRequest("limit 必须为 1 到 50");
+        String cacheKey = publicListCacheKey(cursor, limit);
+        return cached(cacheKey, publicPictureListLocalCache, M1Dtos.PublicPictureCursorPage.class,
+                () -> loadPublicPictures(cursor, limit));
+    }
+
+    public M1Dtos.PublicPictureDetail publicPicture(long pictureId) {
+        String cacheKey = publicDetailCacheKey(pictureId);
+        return cached(cacheKey, publicPictureDetailLocalCache, M1Dtos.PublicPictureDetail.class,
+                () -> loadPublicPicture(pictureId));
+    }
+
+    private M1Dtos.PublicPictureCursorPage loadPublicPictures(String cursor, int limit) {
         Cursor decoded = decodeCursor(cursor);
         LambdaQueryWrapper<Picture> query = new LambdaQueryWrapper<Picture>()
                 .eq(Picture::getVisibility, "public").eq(Picture::getPublishStatus, "approved").eq(Picture::getIsDelete, 0);
@@ -402,11 +445,98 @@ public class M1Service {
         return new M1Dtos.PublicPictureCursorPage(items, next, hasMore);
     }
 
-    public M1Dtos.PublicPictureDetail publicPicture(long pictureId) {
+    private M1Dtos.PublicPictureDetail loadPublicPicture(long pictureId) {
         Picture picture = requirePicture(pictureId);
         if (!"public".equals(picture.getVisibility()) || !"approved".equals(picture.getPublishStatus())) throw V1Exception.notFound();
         User author = userMapper.selectById(picture.getUserId()); M1Dtos.PublicPictureSummary summary = publicSummary(picture, author);
         return new M1Dtos.PublicPictureDetail(summary.id(), summary.thumbnailUrl(), summary.name(), summary.introduction(), summary.category(), summary.tags(), summary.width(), summary.height(), summary.dominantColor(), summary.author(), summary.publishedAt(), assets.publicUrl(picture.getId(), "original"), nz(picture.getPicSize()), picture.getPicFormat(), id(picture.getCurrentVersionId()));
+    }
+
+    private <T> T cached(String cacheKey, Cache<String, String> localCache, Class<T> type, Supplier<T> loader) {
+        if (localCache == null || redis == null || redisson == null || objectMapper == null) return loader.get();
+        String local = localCache.getIfPresent(cacheKey);
+        T value = readCache(local, type);
+        if (value != null) return value;
+        try {
+            value = readCache(redis.opsForValue().get(cacheKey), type);
+            if (value != null) { localCache.put(cacheKey, writeJson(value)); return value; }
+        } catch (RuntimeException ignored) { return loader.get(); }
+
+        RLock lock = redisson.getLock(cacheKey + ":lock");
+        boolean locked = false;
+        try {
+            locked = lock.tryLock(200, 10, TimeUnit.SECONDS);
+            if (!locked) {
+                for (int i = 0; i < 3; i++) {
+                    Thread.sleep(50);
+                    value = readCache(redis.opsForValue().get(cacheKey), type);
+                    if (value != null) { localCache.put(cacheKey, writeJson(value)); return value; }
+                }
+                return loader.get();
+            }
+            value = readCache(redis.opsForValue().get(cacheKey), type);
+            if (value != null) { localCache.put(cacheKey, writeJson(value)); return value; }
+            value = loader.get();
+            String json = writeJson(value);
+            redis.opsForValue().set(cacheKey, json, 60 + ThreadLocalRandom.current().nextLong(241), TimeUnit.SECONDS);
+            localCache.put(cacheKey, json);
+            return value;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return loader.get();
+        } catch (RuntimeException exception) {
+            return loader.get();
+        } finally {
+            if (locked && lock.isHeldByCurrentThread()) lock.unlock();
+        }
+    }
+
+    private <T> T readCache(String json, Class<T> type) {
+        if (json == null || json.isBlank()) return null;
+        try { return objectMapper.readValue(json, type); }
+        catch (Exception ignored) { return null; }
+    }
+
+    private String writeJson(Object value) {
+        try { return objectMapper.writeValueAsString(value); }
+        catch (Exception exception) { throw new IllegalStateException("公开图片缓存序列化失败", exception); }
+    }
+
+    private String publicListCacheKey(String cursor, int limit) {
+        return PUBLIC_CACHE_PREFIX + "v=" + publicCacheVersion() + ":list:" + (cursor == null ? "first" : cursor) + ":" + limit;
+    }
+
+    private String publicDetailCacheKey(long pictureId) {
+        return PUBLIC_CACHE_PREFIX + "v=" + publicCacheVersion() + ":detail:" + pictureId;
+    }
+
+    private String publicCacheVersion() {
+        try {
+            String version = redis.opsForValue().get(PUBLIC_CACHE_VERSION_KEY);
+            return version == null ? "0" : version;
+        } catch (RuntimeException ignored) { return "0"; }
+    }
+
+    private void invalidatePublicPictureCache() {
+        if (publicPictureListLocalCache != null) publicPictureListLocalCache.invalidateAll();
+        if (publicPictureDetailLocalCache != null) publicPictureDetailLocalCache.invalidateAll();
+        if (redis != null) {
+            try { redis.opsForValue().increment(PUBLIC_CACHE_VERSION_KEY); }
+            catch (RuntimeException ignored) { }
+        }
+    }
+
+    private void invalidatePublicPictureCacheAfterCommit() {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    invalidatePublicPictureCache();
+                }
+            });
+        } else {
+            invalidatePublicPictureCache();
+        }
     }
 
     private M1Dtos.PictureDetail savePictureWithCompensation(User user, Space space, PictureStorage.StoredPicture stored,

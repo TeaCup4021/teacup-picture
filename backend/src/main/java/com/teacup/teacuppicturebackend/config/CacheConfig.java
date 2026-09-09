@@ -17,4 +17,20 @@ public class CacheConfig {
                 .expireAfterWrite(30, TimeUnit.MINUTES)  // 写入后30分钟过期
                 .build();
     }
+
+    @Bean("publicPictureListLocalCache")
+    public Cache<String, String> publicPictureListLocalCache() {
+        return Caffeine.newBuilder()
+                .maximumSize(500)
+                .expireAfterWrite(60, TimeUnit.SECONDS)
+                .build();
+    }
+
+    @Bean("publicPictureDetailLocalCache")
+    public Cache<String, String> publicPictureDetailLocalCache() {
+        return Caffeine.newBuilder()
+                .maximumSize(1000)
+                .expireAfterWrite(60, TimeUnit.SECONDS)
+                .build();
+    }
 }

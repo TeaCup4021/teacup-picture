@@ -217,13 +217,17 @@ public class M1Controller {
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "20") int limit,
             HttpServletRequest request) {
-        return response(HttpStatus.OK, service.publicPictures(cursor, limit), request);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.maxAge(java.time.Duration.ofSeconds(30)).cachePublic())
+                .body(V1Response.success(service.publicPictures(cursor, limit), RequestIdFilter.get(request)));
     }
 
     @GetMapping("/public/pictures/{pictureId}")
     public ResponseEntity<V1Response<M1Dtos.PublicPictureDetail>> publicPicture(@PathVariable String pictureId,
-                                                                               HttpServletRequest request) {
-        return response(HttpStatus.OK, service.publicPicture(parseId(pictureId)), request);
+                                                                                HttpServletRequest request) {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.maxAge(java.time.Duration.ofSeconds(30)).cachePublic())
+                .body(V1Response.success(service.publicPicture(parseId(pictureId)), RequestIdFilter.get(request)));
     }
 
     @GetMapping("/pictures/{pictureId}/content")
