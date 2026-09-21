@@ -42,7 +42,7 @@ class AiTaskRunnerTest {
         });
         runner = new AiTaskRunner(taskMapper, mock(PictureMapper.class), mock(UserMapper.class),
                 mock(AiProviderRegistry.class), storage, mock(PersonalSpaceService.class), mock(M1Service.class),
-                mock(AiTaskService.class), transactions, 15);
+                mock(AiTaskService.class), transactions, mock(AiExecutionLimiter.class), 300, 4);
     }
 
     @Test
@@ -50,20 +50,20 @@ class AiTaskRunnerTest {
         AiTask task = new AiTask();
         task.setId(31L);
         task.setStatus("running");
-        when(taskMapper.claimQueued(eq(31L), any())).thenReturn(1);
+        when(taskMapper.claimForExecution(eq(31L), eq("worker-1"), any(), any())).thenReturn(1);
         when(taskMapper.selectById(31L)).thenReturn(task);
 
-        assertSame(task, runner.markRunning(31L));
-        verify(taskMapper).claimQueued(eq(31L), any());
+        assertSame(task, runner.markRunning(31L, "worker-1"));
+        verify(taskMapper).claimForExecution(eq(31L), eq("worker-1"), any(), any());
         verify(taskMapper).selectById(31L);
     }
 
     @Test
     void skipsProviderClaimWhenTaskIsNoLongerQueued() {
-        when(taskMapper.claimQueued(eq(31L), any())).thenReturn(0);
+        when(taskMapper.claimForExecution(eq(31L), eq("worker-1"), any(), any())).thenReturn(0);
 
-        assertNull(runner.markRunning(31L));
-        verify(taskMapper).claimQueued(eq(31L), any());
+        assertNull(runner.markRunning(31L, "worker-1"));
+        verify(taskMapper).claimForExecution(eq(31L), eq("worker-1"), any(), any());
         verify(taskMapper, org.mockito.Mockito.never()).selectById(31L);
     }
 

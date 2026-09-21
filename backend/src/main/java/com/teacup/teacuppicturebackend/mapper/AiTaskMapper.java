@@ -8,7 +8,16 @@ import org.apache.ibatis.annotations.Update;
 import java.time.LocalDateTime;
 
 public interface AiTaskMapper extends BaseMapper<AiTask> {
-    @Update("UPDATE ai_task SET status = 'running', invocationStarted = 1, startTime = #{startTime} "
-            + "WHERE id = #{taskId} AND status = 'queued'")
-    int claimQueued(@Param("taskId") long taskId, @Param("startTime") LocalDateTime startTime);
+    @Update("UPDATE ai_task SET status = 'running', invocationStarted = 1, "
+            + "attemptCount = attemptCount + 1, workerId = #{workerId}, leaseUntil = #{leaseUntil}, "
+            + "startTime = COALESCE(startTime, #{now}) "
+            + "WHERE id = #{taskId} AND ((status = 'queued' AND (nextAttemptAt IS NULL OR nextAttemptAt <= #{now})) "
+            + "OR (status = 'running' AND leaseUntil IS NOT NULL AND leaseUntil <= #{now}))")
+    int claimForExecution(@Param("taskId") long taskId, @Param("workerId") String workerId,
+                          @Param("now") LocalDateTime now, @Param("leaseUntil") LocalDateTime leaseUntil);
+
+    @Update("UPDATE ai_task SET leaseUntil = #{leaseUntil} "
+            + "WHERE id = #{taskId} AND status = 'running' AND workerId = #{workerId}")
+    int renewLease(@Param("taskId") long taskId, @Param("workerId") String workerId,
+                   @Param("leaseUntil") LocalDateTime leaseUntil);
 }

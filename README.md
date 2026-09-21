@@ -19,12 +19,12 @@
 backend/   Spring Boot 后端
 frontend/  Next.js 前端
 docs/      产品、接口、缺口与 UI 设计文档
-docker/    本地 MySQL、Redis 与 MinIO 配置
+docker/    本地 MySQL、Redis、RabbitMQ 与 MinIO 配置
 ```
 
 ## 本地运行
 
-要求 Java 17、Maven 3.8+、Node.js 20+、pnpm，以及 `teacup-picture` Docker Compose 中可用的 MySQL、Redis 和 MinIO。环境变量示例分别见 `backend/src/main/resources/application.yml`、`frontend/.env.example` 和 `docker/.env.example`。
+要求 Java 17、Maven 3.8+、Node.js 20+、pnpm，以及 `teacup-picture` Docker Compose 中可用的 MySQL、Redis、RabbitMQ 和 MinIO。环境变量示例分别见 `backend/src/main/resources/application.yml`、`frontend/.env.example` 和 `docker/.env.example`。
 
 ```powershell
 # 后端

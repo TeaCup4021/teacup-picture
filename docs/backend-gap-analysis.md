@@ -140,11 +140,11 @@ GET /api/v1/public/pictures/{pictureId}
 
 ### 当前事实
 
-M2 已通过 `V3__add_m2_ai_workflow.sql`、`V6__harden_m2_ai_workflow.sql`、`V7__switch_ai_provider_to_openai_images.sql`、`V9__add_ai_image_output_options.sql` 落地 `ai_model`、`ai_task`、`ai_quota_usage`。供应商任务被平台任务 ID 隔离；OpenAI Images API 兼容适配器调用后端配置的兼容端点，兼容 URL 和 Base64 图片结果，支持严格尺寸、背景、输出格式和有损格式质量参数，结果统一经 `PictureStorage` 导入 MinIO 后关联个人空间图片。阿里云 provider 和旧直连接口已移除。
+M2 已通过 `V3__add_m2_ai_workflow.sql`、`V6__harden_m2_ai_workflow.sql`、`V7__switch_ai_provider_to_openai_images.sql`、`V9__add_ai_image_output_options.sql` 落地 `ai_model`、`ai_task`、`ai_quota_usage`，并通过 `V20__add_ai_task_dispatch.sql` 增加执行租约和事务 Outbox。供应商任务被平台任务 ID 隔离；OpenAI Images API 兼容适配器调用后端配置的兼容端点，兼容 URL 和 Base64 图片结果，支持严格尺寸、背景、输出格式和有损格式质量参数，结果统一经 `PictureStorage` 导入 MinIO 后关联个人空间图片。阿里云 provider 和旧直连接口已移除。
 
 ### 实现模型
 
-`ai_task` 至少包含：`id`、`user_id`、`space_id`、`type`、`provider`、`model`、`request_payload`、`status`、`provider_task_id`、`result_picture_id`、`error_code`、`error_message`、`idempotency_key`、时间戳和版本号。状态固定为 `queued/running/succeeded/failed/cancelled`。
+`ai_task` 保存业务状态、配额结算、执行次数、`workerId`、租约和下一次执行时间；`ai_task_outbox` 在任务创建事务中记录待发布事件。对外状态仍固定为 `queued/running/succeeded/failed/cancelled`。
 
 `ai_quota_usage` 至少按 `user_id + quota_type + quota_date` 唯一，记录 `limit_count`、`used_count` 和 `reserved_count`。文生图与扩图每天各 100 次，分别计数；提交时原子预占，确定失败或取消时按规则释放，成功后结算。
 
@@ -155,8 +155,12 @@ M2 已通过 `V3__add_m2_ai_workflow.sql`、`V6__harden_m2_ai_workflow.sql`、`V
 - 任务成功后把结果保存到个人空间并关联 `result_picture_id`；失败原因对用户可见但需脱敏。
 - 创建接口支持幂等键，防止浏览器重试重复扣额和重复调用供应商。
 - 明确取消、超时、供应商成功但本地保存失败、重试和日界线时区（Asia/Shanghai）的处理规则。
+- 创建任务和 Outbox 写入使用同一 MySQL 事务；RabbitMQ Publisher Confirm 成功后才标记事件已发布。
+- RabbitMQ Quorum Queue 承担可靠积压，Worker 固定并发且 `prefetch=1`，不再使用 JVM 内存队列保存待执行任务。
+- Redis 令牌桶限制请求速率，带租约的并发许可限制多实例全局并发；Redis 不可用时失败关闭并延迟重试。
+- Worker 通过 `workerId + leaseUntil` 做 fencing，过期 Worker 不能覆盖新 Worker 的终态；过期租约由恢复任务重新投递。
 
-实现细节：创建事务锁定用户和配额行；queued 取消释放 reserved，running 取消结算 used；供应商失败、超时及结果保存失败释放 reserved；进程重启会恢复 queued，超时 running 进入 failed。取消与成功保存竞争时，成功任务不会留下未关联图片。
+实现细节：创建事务锁定用户和配额行；queued 取消释放 reserved，running 取消结算 used；明确收到的限流、超时和服务端错误按 5/30/120 秒退避，网络结果不确定时不盲目重试；任务执行采用 at-least-once 投递和数据库幂等抢占。完整约束见 `docs/ai-task-execution.md`。
 
 ## 7. 邀请、评论、分享与协作数据模型
 

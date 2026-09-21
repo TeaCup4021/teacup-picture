@@ -638,7 +638,7 @@ NEXT_PUBLIC_APP_ENV=development
 
 所有 `NEXT_PUBLIC_` 变量都会暴露给浏览器，不得存放 MinIO 密钥、模型密钥、会话密钥或服务端 Token。服务端私有环境变量不得使用 `NEXT_PUBLIC_` 前缀。
 
-本地开发已使用同一个 `teacup-picture` Docker Compose 项目管理 MySQL、Redis 和 MinIO，后端与前端仍在宿主机运行。Nginx、应用容器化、CI/CD 和正式生产部署在部署阶段再讨论；以 `docker/README.md` 为当前本地运行说明。
+本地开发已使用同一个 `teacup-picture` Docker Compose 项目管理 MySQL、Redis、RabbitMQ 和 MinIO，后端与前端仍在宿主机运行。Nginx、应用容器化、CI/CD 和正式生产部署在部署阶段再讨论；以 `docker/README.md` 为当前本地运行说明。
 
 后端数据库引入 Flyway 管理版本。开发、测试和 Docker 环境执行同一套迁移脚本，禁止只修改本地数据库而不提交迁移。
 
@@ -756,7 +756,7 @@ GET  /api/v1/admin/spaces
 | `/spaces/personal` | 默认个人空间与图片管理 | M1 已实现列表、状态筛选和提交审核；分页和容量待接入 |
 | `/upload` | 本地与 URL 上传 | M1 已实现个人空间单图上传，20 MB，默认私有 |
 | `/ai/create` | AI 绘图 | 已接入 OpenAI Images API 兼容端点；扩图等待兼容编辑接口 |
-| `/ai/tasks` | AI 任务历史 | 未实现 |
+| `/ai/tasks` | AI 任务历史 | 已实现任务列表、状态、取消、结果下载和可靠异步执行 |
 | `/editor/[pictureId]` | 单人/多人图片编辑 | M3 单人编辑与 M5 单实例协作闭环已实现 |
 | `/spaces/team` | 多团队空间 | 已有单团队限制；需允许最多创建 5 个并修复创建流程 |
 | `/spaces/[id]/members` | 成员和邀请 | 已有直接添加成员；需升级为邀请确认流程 |

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -24,6 +25,7 @@ class AiTaskServiceTest {
     private final UserMapper users = mock(UserMapper.class);
     private final UserService userService = mock(UserService.class);
     private final PictureStorage storage = mock(PictureStorage.class);
+    private final AiTaskOutboxService outbox = mock(AiTaskOutboxService.class);
     private AiTaskService service;
     private User user;
     private AiModel model;
@@ -31,7 +33,7 @@ class AiTaskServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiTaskService(models, quotas, tasks, pictures, users, userService, storage,
+        service = new AiTaskService(models, quotas, tasks, pictures, users, userService, storage, outbox,
                 100, 100, "Asia/Shanghai");
         user = new User(); user.setId(11L);
         model = new AiModel(); model.setId(1L); model.setCode("openai-image"); model.setDisplayName("OpenAI Images");
@@ -104,6 +106,15 @@ class AiTaskServiceTest {
     }
 
     @Test
+    void creatingTaskWritesDurableOutboxEvent() {
+        AiTaskService.CreateResult result = service.create(user, validRequest(), "request-12345678");
+
+        assertTrue(result.created());
+        assertEquals("31", result.task().id());
+        verify(outbox).enqueue(31L);
+    }
+
+    @Test
     void queuedCancellationReleasesReservation() {
         AiTask task = task("queued"); task.setInvocationStarted(0);
         when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
@@ -137,6 +148,33 @@ class AiTaskServiceTest {
 
         assertEquals(0, model.getEnabled());
         verify(models).updateById(model);
+    }
+
+    @Test
+    void staleWorkerCannotOverwriteReassignedTask() {
+        AiTask task = task("running");
+        task.setWorkerId("worker-new");
+        when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
+
+        assertFalse(service.fail(31L, "worker-old", "provider_timeout", "timeout"));
+
+        verify(tasks, never()).updateById(any(AiTask.class));
+    }
+
+    @Test
+    void retryPersistsBackoffAndReleasesWorkerLease() {
+        AiTask task = task("running");
+        task.setWorkerId("worker-1");
+        task.setLeaseUntil(LocalDateTime.now().plusMinutes(5));
+        when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
+
+        assertTrue(service.retry(31L, "worker-1", "provider_rate_limited", "rate limited", 30));
+
+        assertEquals("queued", task.getStatus());
+        assertNull(task.getWorkerId());
+        assertNull(task.getLeaseUntil());
+        assertTrue(task.getNextAttemptAt().isAfter(LocalDateTime.now().plusSeconds(25)));
+        verify(tasks).updateById(task);
     }
 
     private M2Dtos.CreateAiTaskRequest validRequest() {

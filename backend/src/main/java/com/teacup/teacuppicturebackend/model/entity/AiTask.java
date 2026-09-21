@@ -37,6 +37,10 @@ public class AiTask {
     private Integer quotaRefunded;
     private Integer quotaSettled;
     private Integer invocationStarted;
+    private Integer attemptCount;
+    private String workerId;
+    private LocalDateTime leaseUntil;
+    private LocalDateTime nextAttemptAt;
     private LocalDateTime createTime;
     private LocalDateTime startTime;
     private LocalDateTime finishTime;

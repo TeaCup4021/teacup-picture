@@ -28,6 +28,16 @@ spring:
     port: ${REDIS_PORT:6379}
     password: ${REDIS_PASSWORD:}
     timeout: ${REDIS_TIMEOUT:5000}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:127.0.0.1}
+    port: ${RABBITMQ_PORT:${RABBITMQ_HOST_PORT:5672}}
+    username: ${RABBITMQ_USERNAME:teacup}
+    password: ${RABBITMQ_PASSWORD:}
+    virtual-host: ${RABBITMQ_VHOST:/teacup-picture}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
   servlet:
     multipart:
       max-file-size: 20MB
@@ -49,6 +59,16 @@ teacup:
       outpaint-daily: ${AI_OUTPAINT_DAILY_QUOTA:100}
       zone: ${AI_QUOTA_ZONE:Asia/Shanghai}
     running-timeout-minutes: ${AI_RUNNING_TIMEOUT_MINUTES:15}
+    worker:
+      concurrency: ${AI_WORKER_CONCURRENCY:4}
+      global-concurrency: ${AI_PROVIDER_GLOBAL_CONCURRENCY:12}
+      requests-per-minute: ${AI_PROVIDER_REQUESTS_PER_MINUTE:60}
+      burst-capacity: ${AI_PROVIDER_BURST_CAPACITY:4}
+      lease-seconds: ${AI_WORKER_LEASE_SECONDS:300}
+      max-attempts: ${AI_WORKER_MAX_ATTEMPTS:4}
+      shutdown-await-seconds: ${AI_WORKER_SHUTDOWN_AWAIT_SECONDS:180}
+      publish-confirm-timeout-seconds: ${AI_PUBLISH_CONFIRM_TIMEOUT_SECONDS:5}
+      outbox-retention-days: ${AI_OUTBOX_RETENTION_DAYS:7}
     openai:
       base-url: ${OPENAI_API_BASE_URL:https://claudenb.com}
       api-key: ${OPENAI_API_KEY:}

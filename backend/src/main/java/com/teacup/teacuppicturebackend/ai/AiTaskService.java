@@ -22,8 +22,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -49,13 +47,14 @@ public class AiTaskService {
     private final UserMapper userMapper;
     private final UserService userService;
     private final PictureStorage storage;
+    private final AiTaskOutboxService outboxService;
     private final int generateDailyLimit;
     private final int outpaintDailyLimit;
     private final ZoneId quotaZone;
-    private AiTaskRunner runner;
 
     public AiTaskService(AiModelMapper modelMapper, AiQuotaUsageMapper quotaMapper, AiTaskMapper taskMapper,
                          PictureMapper pictureMapper, UserMapper userMapper, UserService userService, PictureStorage storage,
+                         AiTaskOutboxService outboxService,
                          @Value("${teacup.ai.quota.generate-daily:100}") int generateDailyLimit,
                          @Value("${teacup.ai.quota.outpaint-daily:100}") int outpaintDailyLimit,
                          @Value("${teacup.ai.quota.zone:Asia/Shanghai}") String quotaZone) {
@@ -66,14 +65,10 @@ public class AiTaskService {
         this.userMapper = userMapper;
         this.userService = userService;
         this.storage = storage;
+        this.outboxService = outboxService;
         this.generateDailyLimit = generateDailyLimit;
         this.outpaintDailyLimit = outpaintDailyLimit;
         this.quotaZone = ZoneId.of(quotaZone);
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired
-    public void setRunner(AiTaskRunner runner) {
-        this.runner = runner;
     }
 
     public List<M2Dtos.AiModelView> models() {
@@ -116,11 +111,10 @@ public class AiTaskService {
         task.setRatio(input.ratio()); task.setQuality(input.quality()); task.setBackground(output.background());
         task.setOutputFormat(output.format()); task.setOutputCompression(output.compression());
         task.setSourcePictureId(source == null ? null : source.getId());
-        task.setReferencePictureId(reference == null ? null : reference.getId()); task.setStatus("queued"); task.setQuotaCost(cost);
+        task.setReferencePictureId(reference == null ? null : reference.getId()); task.setStatus("queued");
+        task.setNextAttemptAt(LocalDateTime.now()); task.setQuotaCost(cost);
         task.setQuotaRefunded(0); task.setQuotaSettled(0); task.setInvocationStarted(0); taskMapper.insert(task);
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override public void afterCommit() { runner.runAsync(task.getId()); }
-        });
+        outboxService.enqueue(task.getId());
         return new CreateResult(taskView(task, model), true);
     }
 
@@ -145,7 +139,7 @@ public class AiTaskService {
         if (task == null || !Objects.equals(task.getUserId(), user.getId())) throw V1Exception.notFound();
         if (!Set.of("queued", "running").contains(task.getStatus())) throw V1Exception.conflict("任务当前不可取消");
         boolean queued = "queued".equals(task.getStatus()) && !Integer.valueOf(1).equals(task.getInvocationStarted());
-        task.setStatus("cancelled"); task.setFinishTime(LocalDateTime.now());
+        task.setStatus("cancelled"); task.setFinishTime(LocalDateTime.now()); task.setWorkerId(null); task.setLeaseUntil(null);
         if (queued && !Integer.valueOf(1).equals(task.getQuotaSettled())) {
             releaseReservation(task); task.setQuotaRefunded(1);
         } else if (!Integer.valueOf(1).equals(task.getQuotaSettled())) {
@@ -156,14 +150,34 @@ public class AiTaskService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public void fail(long taskId, String code, String reason) {
+    public boolean fail(long taskId, String workerId, String code, String reason) {
         AiTask task = taskMapper.selectOne(new LambdaQueryWrapper<AiTask>().eq(AiTask::getId, taskId).last("FOR UPDATE"));
-        if (task == null || "cancelled".equals(task.getStatus()) || "succeeded".equals(task.getStatus())) return;
-        task.setStatus("failed"); task.setFailureCode(trim(code, 64)); task.setFailureReason(trim(reason, 500)); task.setFinishTime(LocalDateTime.now());
+        if (task == null || !"running".equals(task.getStatus()) || !Objects.equals(workerId, task.getWorkerId())) {
+            return false;
+        }
+        task.setStatus("failed"); task.setFailureCode(trim(code, 64)); task.setFailureReason(trim(reason, 500));
+        task.setFinishTime(LocalDateTime.now()); task.setWorkerId(null); task.setLeaseUntil(null);
         if (!Integer.valueOf(1).equals(task.getQuotaSettled()) && !Integer.valueOf(1).equals(task.getQuotaRefunded())) {
             releaseReservation(task); task.setQuotaRefunded(1);
         }
         taskMapper.updateById(task);
+        return true;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public boolean retry(long taskId, String workerId, String code, String reason, int delaySeconds) {
+        AiTask task = taskMapper.selectOne(new LambdaQueryWrapper<AiTask>().eq(AiTask::getId, taskId).last("FOR UPDATE"));
+        if (task == null || !"running".equals(task.getStatus()) || !Objects.equals(workerId, task.getWorkerId())) {
+            return false;
+        }
+        task.setStatus("queued");
+        task.setFailureCode(trim(code, 64));
+        task.setFailureReason(trim(reason, 500));
+        task.setWorkerId(null);
+        task.setLeaseUntil(null);
+        task.setNextAttemptAt(LocalDateTime.now().plusSeconds(Math.max(1, delaySeconds)));
+        taskMapper.updateById(task);
+        return true;
     }
 
     public Download download(User user, long taskId) {

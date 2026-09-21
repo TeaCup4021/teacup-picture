@@ -1,8 +1,8 @@
 # Local Docker Infrastructure
 
-This Compose project runs the MySQL, Redis, and MinIO dependencies used by Teacup Picture during local development. The backend and frontend continue to run on the host.
+This Compose project runs the MySQL, Redis, RabbitMQ, and MinIO dependencies used by Teacup Picture during local development. The backend and frontend continue to run on the host.
 
-The infrastructure images are pinned to MySQL 8.0.46 and Redis 7.4.9 Alpine. Version changes must be reviewed and committed with this Compose file.
+The infrastructure images are pinned to MySQL 8.0.46, Redis 7.4.9 Alpine, and RabbitMQ 4.1.8 Management Alpine. Version changes must be reviewed and committed with this Compose file.
 
 Docker Desktop groups both containers under one `teacup-picture` project:
 
@@ -10,6 +10,7 @@ Docker Desktop groups both containers under one `teacup-picture` project:
 teacup-picture
 |- mysql
 |- redis
+|- rabbitmq
 |- minio
 `- minio-init
 ```
@@ -29,6 +30,8 @@ The default host endpoints are:
 ```text
 MySQL: 127.0.0.1:13306
 Redis: 127.0.0.1:16379
+RabbitMQ AMQP: 127.0.0.1:15672
+RabbitMQ Management: http://127.0.0.1:15673
 MinIO API: http://127.0.0.1:19000
 MinIO Console: http://127.0.0.1:19001
 ```
@@ -42,6 +45,11 @@ $env:DB_PASSWORD='<MYSQL_PASSWORD from docker/.env>'
 $env:REDIS_HOST='127.0.0.1'
 $env:REDIS_PORT='16379'
 $env:REDIS_PASSWORD='<REDIS_PASSWORD from docker/.env>'
+$env:RABBITMQ_HOST='127.0.0.1'
+$env:RABBITMQ_PORT='15672'
+$env:RABBITMQ_USERNAME='teacup'
+$env:RABBITMQ_PASSWORD='<RABBITMQ_PASSWORD from docker/.env>'
+$env:RABBITMQ_VHOST='/teacup-picture'
 $env:MINIO_ENDPOINT='http://127.0.0.1:19000'
 $env:MINIO_APP_ACCESS_KEY='<MINIO_APP_ACCESS_KEY from docker/.env>'
 $env:MINIO_APP_SECRET_KEY='<MINIO_APP_SECRET_KEY from docker/.env>'
@@ -73,19 +81,20 @@ docker compose --env-file docker\.env -f docker\compose.yml start
 docker compose --env-file docker\.env -f docker\compose.yml down
 
 # Follow service logs
-docker compose --env-file docker\.env -f docker\compose.yml logs -f mysql redis minio minio-init
+docker compose --env-file docker\.env -f docker\compose.yml logs -f mysql redis rabbitmq minio minio-init
 ```
 
 Do not add `--volumes` to `down` unless local database and Redis data are intentionally being discarded. The existing standalone `mysql-server` container is unrelated to this project and is not modified by these commands.
 
 ## Validation
 
-MySQL, Redis, and MinIO should report `healthy`; `minio-init` should report an exit code of `0`:
+MySQL, Redis, RabbitMQ, and MinIO should report `healthy`; `minio-init` should report an exit code of `0`:
 
 ```powershell
 docker compose --env-file docker\.env -f docker\compose.yml ps
 docker compose --env-file docker\.env -f docker\compose.yml exec mysql sh -c 'mysqladmin ping -h localhost -uroot -p"$MYSQL_ROOT_PASSWORD"'
 docker compose --env-file docker\.env -f docker\compose.yml exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" ping'
+docker compose --env-file docker\.env -f docker\compose.yml exec rabbitmq rabbitmq-diagnostics -q ping
 docker compose --env-file docker\.env -f docker\compose.yml exec minio curl -f http://localhost:9000/minio/health/live
 ```
 
