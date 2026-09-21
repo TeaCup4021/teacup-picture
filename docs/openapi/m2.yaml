@@ -38,6 +38,12 @@ paths:
         - in: header
           name: Idempotency-Key
           required: true
+          description: >-
+            为一次「用户意图」生成的幂等键：用户在客户端点击提交时生成并缓存，
+            所有自动重试（网络超时、手动重试）必须复用同一个键；用户修改内容后重新提交才生成新键。
+            服务端语义：同键 + 请求内容一致 → 返回既有任务（200，不新建、不扣配额）；
+            同键 + 请求内容不一致 → 409，客户端应更换幂等键；新键 → 新建任务（201）。
+            保留期为永久——幂等记录就是任务行本身，键一旦使用即被永久占用，客户端不得复用历史键。
           schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$' }
       requestBody:
         required: true
@@ -226,4 +232,4 @@ components:
     Unauthorized: { description: Missing or expired Cookie session, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
     Forbidden: { description: Administrator role required, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
     NotFound: { description: Resource does not exist or is not visible, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
-    Conflict: { description: Invalid state or exhausted quota, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+    Conflict: { description: Invalid state, exhausted quota, or Idempotency-Key reused with a different request body, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }

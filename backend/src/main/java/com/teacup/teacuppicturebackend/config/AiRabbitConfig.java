@@ -136,6 +136,27 @@ public class AiRabbitConfig {
         return factory;
     }
 
+    /**
+     * 死信队列专用容器：单并发、不使用 aiWorkerExecutor。
+     * 死信处理是低频收尾动作，不得占用工作线程池的 4 个任务槽位。
+     */
+    @Bean(name = "aiDlqListenerContainerFactory")
+    public SimpleRabbitListenerContainerFactory aiDlqListenerContainerFactory(
+            SimpleRabbitListenerContainerFactoryConfigurer configurer,
+            ConnectionFactory connectionFactory,
+            Jackson2JsonMessageConverter aiMessageConverter) {
+        SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
+        configurer.configure(factory, connectionFactory);
+        factory.setMessageConverter(aiMessageConverter);
+        factory.setConcurrentConsumers(1);
+        factory.setMaxConcurrentConsumers(1);
+        factory.setPrefetchCount(1);
+        factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
+        factory.setDefaultRequeueRejected(false);
+        factory.setMissingQueuesFatal(true);
+        return factory;
+    }
+
     private static Queue retryQueue(String name, int ttlMillis) {
         return QueueBuilder.durable(name)
                 .quorum()

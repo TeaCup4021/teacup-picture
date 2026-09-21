@@ -9,11 +9,13 @@ import com.teacup.teacuppicturebackend.api.v1.model.M2Dtos;
 import com.teacup.teacuppicturebackend.mapper.AiModelMapper;
 import com.teacup.teacuppicturebackend.mapper.AiQuotaUsageMapper;
 import com.teacup.teacuppicturebackend.mapper.AiTaskMapper;
+import com.teacup.teacuppicturebackend.mapper.AiTaskQuotaAuditMapper;
 import com.teacup.teacuppicturebackend.mapper.PictureMapper;
 import com.teacup.teacuppicturebackend.mapper.UserMapper;
 import com.teacup.teacuppicturebackend.model.entity.AiModel;
 import com.teacup.teacuppicturebackend.model.entity.AiQuotaUsage;
 import com.teacup.teacuppicturebackend.model.entity.AiTask;
+import com.teacup.teacuppicturebackend.model.entity.AiTaskQuotaAudit;
 import com.teacup.teacuppicturebackend.model.entity.Picture;
 import com.teacup.teacuppicturebackend.model.entity.User;
 import com.teacup.teacuppicturebackend.service.UserService;
@@ -43,6 +45,7 @@ public class AiTaskService {
     private final AiModelMapper modelMapper;
     private final AiQuotaUsageMapper quotaMapper;
     private final AiTaskMapper taskMapper;
+    private final AiTaskQuotaAuditMapper quotaAuditMapper;
     private final PictureMapper pictureMapper;
     private final UserMapper userMapper;
     private final UserService userService;
@@ -53,6 +56,7 @@ public class AiTaskService {
     private final ZoneId quotaZone;
 
     public AiTaskService(AiModelMapper modelMapper, AiQuotaUsageMapper quotaMapper, AiTaskMapper taskMapper,
+                         AiTaskQuotaAuditMapper quotaAuditMapper,
                          PictureMapper pictureMapper, UserMapper userMapper, UserService userService, PictureStorage storage,
                          AiTaskOutboxService outboxService,
                          @Value("${teacup.ai.quota.generate-daily:100}") int generateDailyLimit,
@@ -61,6 +65,7 @@ public class AiTaskService {
         this.modelMapper = modelMapper;
         this.quotaMapper = quotaMapper;
         this.taskMapper = taskMapper;
+        this.quotaAuditMapper = quotaAuditMapper;
         this.pictureMapper = pictureMapper;
         this.userMapper = userMapper;
         this.userService = userService;
@@ -140,34 +145,92 @@ public class AiTaskService {
         if (!Set.of("queued", "running").contains(task.getStatus())) throw V1Exception.conflict("任务当前不可取消");
         boolean queued = "queued".equals(task.getStatus()) && !Integer.valueOf(1).equals(task.getInvocationStarted());
         task.setStatus("cancelled"); task.setFinishTime(LocalDateTime.now()); task.setWorkerId(null); task.setLeaseUntil(null);
-        if (queued && !Integer.valueOf(1).equals(task.getQuotaSettled())) {
-            releaseReservation(task); task.setQuotaRefunded(1);
-        } else if (!Integer.valueOf(1).equals(task.getQuotaSettled())) {
-            settleQuota(task);
+        // 任务尚未发起调用：退还预占。已发起调用：上游成本已产生，照常结算。
+        if (queued) {
+            finalizeQuota(task, true, "cancelled_before_invocation");
+        } else {
+            finalizeQuota(task, false, "cancelled_after_invocation");
         }
         taskMapper.updateById(task);
         return taskView(task);
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public boolean fail(long taskId, String workerId, String code, String reason) {
+    public boolean fail(long taskId, String workerId, long executionToken, String code, String reason) {
         AiTask task = taskMapper.selectOne(new LambdaQueryWrapper<AiTask>().eq(AiTask::getId, taskId).last("FOR UPDATE"));
-        if (task == null || !"running".equals(task.getStatus()) || !Objects.equals(workerId, task.getWorkerId())) {
+        if (!ownedBy(task, workerId, executionToken)) {
             return false;
         }
         task.setStatus("failed"); task.setFailureCode(trim(code, 64)); task.setFailureReason(trim(reason, 500));
         task.setFinishTime(LocalDateTime.now()); task.setWorkerId(null); task.setLeaseUntil(null);
-        if (!Integer.valueOf(1).equals(task.getQuotaSettled()) && !Integer.valueOf(1).equals(task.getQuotaRefunded())) {
-            releaseReservation(task); task.setQuotaRefunded(1);
+        finalizeQuota(task, true, "failed_" + trim(code, 64));
+        taskMapper.updateById(task);
+        return true;
+    }
+
+    /**
+     * 尝试次数耗尽或死信回收：将任务终态化并归还预占。
+     * 不校验执行者身份——调用方是抢占失败的执行者或死信消费者，此时任务已无有效持有者。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean exhaust(long taskId) {
+        return exhaust(taskId, "attempts_exhausted", "AI 任务重试次数已用尽");
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public boolean exhaust(long taskId, String code, String reason) {
+        AiTask task = taskMapper.selectOne(new LambdaQueryWrapper<AiTask>().eq(AiTask::getId, taskId).last("FOR UPDATE"));
+        if (task == null || terminal(task.getStatus())) return false;
+        String previous = task.getStatus();
+        task.setStatus("failed"); task.setFailureCode(trim(code, 64)); task.setFailureReason(trim(reason, 500));
+        task.setFinishTime(LocalDateTime.now()); task.setWorkerId(null); task.setLeaseUntil(null);
+        finalizeQuota(task, true, "exhausted_from_" + previous);
+        taskMapper.updateById(task);
+        return true;
+    }
+
+    /**
+     * 对账修正入口：修复「事件路径没走完」留下的预占悬挂。
+     * 只处理已终态的任务，或创建时间超过 zombieAgeMinutes 的非终态任务。
+     * 正在执行且租约未过期的任务一律不动。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean reconcile(long taskId, long zombieAgeMinutes) {
+        AiTask task = taskMapper.selectOne(new LambdaQueryWrapper<AiTask>().eq(AiTask::getId, taskId).last("FOR UPDATE"));
+        if (task == null) return false;
+        if (Integer.valueOf(1).equals(task.getQuotaSettled()) || Integer.valueOf(1).equals(task.getQuotaRefunded())) return false;
+        String status = task.getStatus();
+        if (terminal(status)) {
+            if ("succeeded".equals(status)) {
+                finalizeQuota(task, false, "settled_missing");
+            } else {
+                finalizeQuota(task, true, "release_missing");
+            }
+            taskMapper.updateById(task);
+            return true;
         }
+        if ("running".equals(status) && task.getLeaseUntil() != null && task.getLeaseUntil().isAfter(LocalDateTime.now())) {
+            return false;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (task.getCreateTime() == null || task.getCreateTime().isAfter(now.minusMinutes(Math.max(1, zombieAgeMinutes)))) {
+            return false;
+        }
+        task.setStatus("failed");
+        task.setFailureCode("reconcile_zombie");
+        task.setFailureReason("AI 任务长期未达终态，已由配额对账任务回收");
+        task.setFinishTime(now);
+        task.setWorkerId(null);
+        task.setLeaseUntil(null);
+        finalizeQuota(task, true, "zombie_task");
         taskMapper.updateById(task);
         return true;
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public boolean retry(long taskId, String workerId, String code, String reason, int delaySeconds) {
+    public boolean retry(long taskId, String workerId, long executionToken, String code, String reason, int delaySeconds) {
         AiTask task = taskMapper.selectOne(new LambdaQueryWrapper<AiTask>().eq(AiTask::getId, taskId).last("FOR UPDATE"));
-        if (task == null || !"running".equals(task.getStatus()) || !Objects.equals(workerId, task.getWorkerId())) {
+        if (!ownedBy(task, workerId, executionToken)) {
             return false;
         }
         task.setStatus("queued");
@@ -229,6 +292,10 @@ public class AiTaskService {
         return task == null || "cancelled".equals(task.getStatus());
     }
 
+    public boolean isTerminal(String status) {
+        return terminal(status);
+    }
+
     public void settleQuota(AiTask task) {
         if (Integer.valueOf(1).equals(task.getQuotaSettled())) return;
         AiQuotaUsage usage = lockedUsage(task);
@@ -236,6 +303,36 @@ public class AiTaskService {
         usage.setUsedCount(nz(usage.getUsedCount()) + task.getQuotaCost());
         quotaMapper.updateById(usage);
         task.setQuotaSettled(1);
+    }
+
+    /**
+     * 统一收尾入口：所有额度的终态流转（结算 / 归还）都必须走这里，避免散落在各出口导致漏归还。
+     * 幂等，靠任务上的 quotaSettled / quotaRefunded 标记判定，重复调用无副作用。
+     * 本方法不负责写 ai_task 行，由调用方在事务内 updateById。
+     */
+    private void finalizeQuota(AiTask task, boolean refund, String reason) {
+        if (Integer.valueOf(1).equals(task.getQuotaSettled())) return;
+        if (refund) {
+            if (Integer.valueOf(1).equals(task.getQuotaRefunded())) return;
+            releaseReservation(task);
+            task.setQuotaRefunded(1);
+            audit(task, "released", reason);
+        } else {
+            settleQuota(task);
+            audit(task, "settled", reason);
+        }
+    }
+
+    private void audit(AiTask task, String action, String reason) {
+        AiTaskQuotaAudit record = new AiTaskQuotaAudit();
+        record.setTaskId(task.getId());
+        record.setUserId(task.getUserId());
+        record.setTaskType(task.getTaskType());
+        record.setQuotaCost(nz(task.getQuotaCost()));
+        record.setUsageDate(usageDate(task));
+        record.setAction(action);
+        record.setReason(trim(reason, 128));
+        quotaAuditMapper.insert(record);
     }
 
     private void reserveQuota(long userId, String type, int cost) {
@@ -252,9 +349,14 @@ public class AiTaskService {
     }
 
     private AiQuotaUsage lockedUsage(AiTask task) {
-        LocalDate date = task.getCreateTime() == null ? LocalDate.now(quotaZone) : task.getCreateTime().atZone(ZoneOffset.UTC).withZoneSameInstant(quotaZone).toLocalDate();
-        quotaMapper.ensureRow(task.getUserId(), date, task.getTaskType());
-        return quotaMapper.selectForUpdate(task.getUserId(), date, task.getTaskType());
+        quotaMapper.ensureRow(task.getUserId(), usageDate(task), task.getTaskType());
+        return quotaMapper.selectForUpdate(task.getUserId(), usageDate(task), task.getTaskType());
+    }
+
+    /** 任务归属的额度日期：createTime 按 UTC 解释后转换到 quotaZone。所有对账路径必须复用此处。 */
+    private LocalDate usageDate(AiTask task) {
+        return task.getCreateTime() == null ? LocalDate.now(quotaZone)
+                : task.getCreateTime().atZone(ZoneOffset.UTC).withZoneSameInstant(quotaZone).toLocalDate();
     }
 
     private M2Dtos.AiQuotaView quotaView(long userId, LocalDate date, String type) {
@@ -347,6 +449,13 @@ public class AiTaskService {
         }
     }
     private static int nz(Integer value) { return value == null ? 0 : value; }
+    private static long token(AiTask task) { return task == null || task.getExecutionToken() == null ? 0L : task.getExecutionToken(); }
+    private static boolean terminal(String status) { return "succeeded".equals(status) || "failed".equals(status) || "cancelled".equals(status); }
+    /** 终态归属校验：状态、执行者标识、执行令牌三者同时匹配才算「本实例仍持有该任务」。 */
+    private static boolean ownedBy(AiTask task, String workerId, long executionToken) {
+        return task != null && "running".equals(task.getStatus())
+                && Objects.equals(workerId, task.getWorkerId()) && token(task) == executionToken;
+    }
     private static String id(Long value) { return value == null ? null : value.toString(); }
     private static String blank(String value) { return value == null || value.isBlank() ? null : value.trim(); }
     private static void validatePage(int page, int pageSize) { if (page < 1 || pageSize < 1 || pageSize > 100) throw V1Exception.badRequest("分页参数无效"); }

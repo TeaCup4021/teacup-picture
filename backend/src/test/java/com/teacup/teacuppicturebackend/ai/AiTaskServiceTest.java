@@ -21,6 +21,7 @@ class AiTaskServiceTest {
     private final AiModelMapper models = mock(AiModelMapper.class);
     private final AiQuotaUsageMapper quotas = mock(AiQuotaUsageMapper.class);
     private final AiTaskMapper tasks = mock(AiTaskMapper.class);
+    private final AiTaskQuotaAuditMapper quotaAudits = mock(AiTaskQuotaAuditMapper.class);
     private final PictureMapper pictures = mock(PictureMapper.class);
     private final UserMapper users = mock(UserMapper.class);
     private final UserService userService = mock(UserService.class);
@@ -33,7 +34,7 @@ class AiTaskServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiTaskService(models, quotas, tasks, pictures, users, userService, storage, outbox,
+        service = new AiTaskService(models, quotas, tasks, quotaAudits, pictures, users, userService, storage, outbox,
                 100, 100, "Asia/Shanghai");
         user = new User(); user.setId(11L);
         model = new AiModel(); model.setId(1L); model.setCode("openai-image"); model.setDisplayName("OpenAI Images");
@@ -156,8 +157,66 @@ class AiTaskServiceTest {
         task.setWorkerId("worker-new");
         when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
 
-        assertFalse(service.fail(31L, "worker-old", "provider_timeout", "timeout"));
+        assertFalse(service.fail(31L, "worker-old", 0L, "provider_timeout", "timeout"));
 
+        verify(tasks, never()).updateById(any(AiTask.class));
+    }
+
+    @Test
+    void staleExecutionTokenCannotOverwriteTaskTakenOverByAnotherAttempt() {
+        AiTask task = task("running");
+        task.setWorkerId("worker-1");
+        task.setExecutionToken(2L);
+        when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
+
+        // 同一个执行者标识，但令牌已被抢占递增：本次执行结果作废。
+        assertFalse(service.fail(31L, "worker-1", 1L, "provider_timeout", "timeout"));
+        assertFalse(service.retry(31L, "worker-1", 1L, "provider_timeout", "timeout", 5));
+
+        verify(tasks, never()).updateById(any(AiTask.class));
+    }
+
+    @Test
+    void exhaustedAttemptsAreFinalizedAndReservationReleased() {
+        AiTask task = task("queued");
+        task.setAttemptCount(4);
+        task.setInvocationStarted(1);
+        quota.setReservedCount(1);
+        when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
+
+        assertTrue(service.exhaust(31L));
+
+        assertEquals("failed", task.getStatus());
+        assertEquals("attempts_exhausted", task.getFailureCode());
+        assertEquals(1, task.getQuotaRefunded());
+        assertEquals(0, quota.getReservedCount());
+        verify(quotaAudits).insert(any(AiTaskQuotaAudit.class));
+    }
+
+    @Test
+    void reconciliationReleasesSuspendedReservationOfTerminalTask() {
+        AiTask task = task("failed");
+        task.setCreateTime(LocalDateTime.now().minusHours(8));
+        quota.setReservedCount(1);
+        when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
+
+        assertTrue(service.reconcile(31L, 120));
+
+        assertEquals(1, task.getQuotaRefunded());
+        assertEquals(0, quota.getReservedCount());
+        verify(quotaAudits).insert(any(AiTaskQuotaAudit.class));
+    }
+
+    @Test
+    void reconciliationSkipsRunningTaskWhoseLeaseIsStillValid() {
+        AiTask task = task("running");
+        task.setCreateTime(LocalDateTime.now().minusHours(8));
+        task.setLeaseUntil(LocalDateTime.now().plusMinutes(5));
+        when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
+
+        assertFalse(service.reconcile(31L, 120));
+
+        assertEquals("running", task.getStatus());
         verify(tasks, never()).updateById(any(AiTask.class));
     }
 
@@ -168,7 +227,7 @@ class AiTaskServiceTest {
         task.setLeaseUntil(LocalDateTime.now().plusMinutes(5));
         when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
 
-        assertTrue(service.retry(31L, "worker-1", "provider_rate_limited", "rate limited", 30));
+        assertTrue(service.retry(31L, "worker-1", 0L, "provider_rate_limited", "rate limited", 30));
 
         assertEquals("queued", task.getStatus());
         assertNull(task.getWorkerId());
@@ -187,6 +246,6 @@ class AiTaskServiceTest {
         task.setModelId(1L); task.setModelCode("openai-image"); task.setPrompt("tea"); task.setRatio("1:1");
         task.setQuality("standard"); task.setBackground("auto"); task.setOutputFormat("png");
         task.setStatus(status); task.setQuotaCost(1); task.setQuotaRefunded(0);
-        task.setQuotaSettled(0); return task;
+        task.setQuotaSettled(0); task.setExecutionToken(0L); return task;
     }
 }

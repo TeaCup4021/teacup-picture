@@ -39,6 +39,7 @@ public class AiTask {
     private Integer invocationStarted;
     private Integer attemptCount;
     private String workerId;
+    private Long executionToken;
     private LocalDateTime leaseUntil;
     private LocalDateTime nextAttemptAt;
     private LocalDateTime createTime;

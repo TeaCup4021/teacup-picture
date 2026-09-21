@@ -10,6 +10,7 @@ import com.teacup.teacuppicturebackend.model.entity.Picture;
 import com.teacup.teacuppicturebackend.model.entity.User;
 import com.teacup.teacuppicturebackend.service.PersonalSpaceService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -19,8 +20,8 @@ import java.io.ByteArrayInputStream;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
+@Slf4j
 @Component
 public class AiTaskRunner {
     private final AiTaskMapper taskMapper;
@@ -33,15 +34,16 @@ public class AiTaskRunner {
     private final AiTaskService taskService;
     private final TransactionTemplate transactionTemplate;
     private final AiExecutionLimiter limiter;
+    private final AiWorkerIdentity workerIdentity;
     private final long leaseSeconds;
     private final int maxAttempts;
-    private final String workerInstanceId = UUID.randomUUID().toString();
 
     public AiTaskRunner(AiTaskMapper taskMapper, PictureMapper pictureMapper, UserMapper userMapper,
                          AiProviderRegistry providerRegistry, PictureStorage storage,
                          PersonalSpaceService personalSpaceService, M1Service m1Service, AiTaskService taskService,
                          TransactionTemplate transactionTemplate,
                          AiExecutionLimiter limiter,
+                         AiWorkerIdentity workerIdentity,
                          @Value("${teacup.ai.worker.lease-seconds:300}") long leaseSeconds,
                          @Value("${teacup.ai.worker.max-attempts:4}") int maxAttempts) {
         this.taskMapper = taskMapper;
@@ -54,6 +56,7 @@ public class AiTaskRunner {
         this.taskService = taskService;
         this.transactionTemplate = transactionTemplate;
         this.limiter = limiter;
+        this.workerIdentity = workerIdentity;
         this.leaseSeconds = leaseSeconds;
         this.maxAttempts = maxAttempts;
     }
@@ -77,21 +80,21 @@ public class AiTaskRunner {
             return ExecutionResult.retry(5, "limiter_unavailable");
         }
         if (acquired.isEmpty()) return ExecutionResult.retry(5, "provider_capacity_exhausted");
-        String workerId = workerInstanceId + ":" + Thread.currentThread().getName();
+        String workerId = workerIdentity.workerId();
         try (AiExecutionLimiter.Permit permit = acquired.get()) {
             AiTask task = markRunning(taskId, workerId);
             if (task == null) {
-                AiTask current = taskMapper.selectById(taskId);
-                return current == null || terminal(current.getStatus())
-                        ? ExecutionResult.ack() : ExecutionResult.retry(5, "task_claim_conflict");
+                return handleClaimFailure(taskId);
             }
+            long executionToken = token(task);
             Picture source = task.getSourcePictureId() == null ? null : pictureMapper.selectById(task.getSourcePictureId());
             Picture reference = task.getReferencePictureId() == null ? null : pictureMapper.selectById(task.getReferencePictureId());
             AiProviderResult result = providerRegistry.require(task.getProvider()).execute(new AiProviderRequest(
                     task.getTaskType(), task.getProviderModel(), task.getPrompt(), task.getRatio(), task.getQuality(),
                     task.getBackground(), task.getOutputFormat(), task.getOutputCompression(),
                     providerUrl(source), providerUrl(reference)));
-            renewLease(taskId, workerId);
+            // 结果落库前确认租约仍归属本实例；期间由 AiTaskLeaseRenewer 负责周期性续租。
+            renewLease(taskId, workerId, executionToken);
             if (taskService.isCancelled(taskId)) return ExecutionResult.ack();
             User user = userMapper.selectById(task.getUserId());
             long spaceId = personalSpaceService.getOrCreatePersonalSpace(user.getId()).getId();
@@ -99,28 +102,48 @@ public class AiTaskRunner {
             Picture picture = m1Service.saveGeneratedPicture(user, stored,
                     "AI " + ("generate".equals(task.getTaskType()) ? "绘图" : "扩图") + " " + task.getId(),
                     task.getPrompt(), List.of("AI", "generate".equals(task.getTaskType()) ? "绘图" : "扩图"));
-            if (!complete(taskId, workerId, result, picture.getId())) {
+            if (!complete(taskId, workerId, executionToken, result, picture.getId())) {
                 m1Service.discardGeneratedPicture(picture);
             }
             return ExecutionResult.ack();
+        } catch (AiTaskLeaseLostException exception) {
+            // 租约已归属他人：任务已由恢复服务重新入队，本实例结果作废。
+            // 这里不能调用 fail——该任务的归属已不属于本实例。
+            log.warn("AI task lease lost before result persistence, taskId={}", taskId);
+            return ExecutionResult.ack();
         } catch (AiProviderException exception) {
             AiTask task = taskMapper.selectById(taskId);
+            long executionToken = token(task);
             if ("provider_permission_denied".equals(exception.getCode()) && task != null && task.getModelId() != null) {
                 taskService.disableModel(task.getModelId());
             }
             if (task != null && retryable(exception.getCode()) && attempts(task) < maxAttempts
-                    && taskService.retry(taskId, workerId, exception.getCode(), exception.getMessage(),
+                    && taskService.retry(taskId, workerId, executionToken, exception.getCode(), exception.getMessage(),
                     retryDelay(attempts(task)))) {
                 return ExecutionResult.retry(retryDelay(attempts(task)), exception.getCode());
             }
             String code = "provider_network_error".equals(exception.getCode())
                     ? "provider_outcome_unknown" : exception.getCode();
-            taskService.fail(taskId, workerId, code, exception.getMessage());
+            taskService.fail(taskId, workerId, executionToken, code, exception.getMessage());
             return ExecutionResult.ack();
         } catch (RuntimeException exception) {
-            taskService.fail(taskId, workerId, "result_persistence_failed", "AI 结果保存失败");
+            taskService.fail(taskId, workerId, token(taskMapper.selectById(taskId)), "result_persistence_failed", "AI 结果保存失败");
             return ExecutionResult.ack();
         }
+    }
+
+    /**
+     * 抢占失败：可能是任务已被他人接管，也可能是本任务的尝试次数已达上限。
+     * 后者必须终态化，否则会无限重投并让配额预占永久悬挂。
+     */
+    private ExecutionResult handleClaimFailure(long taskId) {
+        AiTask current = taskMapper.selectById(taskId);
+        if (current == null || terminal(current.getStatus())) return ExecutionResult.ack();
+        if ("queued".equals(current.getStatus()) && attempts(current) >= maxAttempts) {
+            taskService.exhaust(taskId);
+            return ExecutionResult.ack();
+        }
+        return ExecutionResult.retry(5, "task_claim_conflict");
     }
 
     PictureStorage.StoredPicture storeResult(AiProviderResult result, long spaceId) {
@@ -150,24 +173,25 @@ public class AiTaskRunner {
     public AiTask markRunning(long taskId, String workerId) {
         return transactionTemplate.execute(status -> {
             LocalDateTime now = LocalDateTime.now();
-            if (taskMapper.claimForExecution(taskId, workerId, now, now.plusSeconds(leaseSeconds)) != 1) return null;
+            if (taskMapper.claimForExecution(taskId, workerId, now, now.plusSeconds(leaseSeconds), maxAttempts) != 1) return null;
             return taskMapper.selectById(taskId);
         });
     }
 
-    private void renewLease(long taskId, String workerId) {
+    private void renewLease(long taskId, String workerId, long executionToken) {
         LocalDateTime leaseUntil = LocalDateTime.now().plusSeconds(leaseSeconds);
-        if (taskMapper.renewLease(taskId, workerId, leaseUntil) != 1) {
-            throw new IllegalStateException("AI task execution lease was lost");
+        if (taskMapper.renewLease(taskId, workerId, executionToken, leaseUntil) != 1) {
+            throw new AiTaskLeaseLostException("AI task execution lease was lost, taskId=" + taskId);
         }
     }
 
-    public boolean complete(long taskId, String workerId, AiProviderResult result, long pictureId) {
+    public boolean complete(long taskId, String workerId, long executionToken, AiProviderResult result, long pictureId) {
         Boolean completed = transactionTemplate.execute(status -> {
             AiTask task = taskMapper.selectOne(new LambdaQueryWrapper<AiTask>()
                     .eq(AiTask::getId, taskId).last("FOR UPDATE"));
             if (task == null || !"running".equals(task.getStatus())
-                    || !java.util.Objects.equals(workerId, task.getWorkerId())) return false;
+                    || !java.util.Objects.equals(workerId, task.getWorkerId())
+                    || token(task) != executionToken) return false;
             task.setStatus("succeeded");
             task.setProviderTaskId(result.providerTaskId());
             task.setProviderRequestId(result.providerRequestId());
@@ -189,6 +213,10 @@ public class AiTaskRunner {
 
     private static int attempts(AiTask task) {
         return task == null || task.getAttemptCount() == null ? 0 : task.getAttemptCount();
+    }
+
+    private static long token(AiTask task) {
+        return task == null || task.getExecutionToken() == null ? 0L : task.getExecutionToken();
     }
 
     private static int retryDelay(int attempts) {

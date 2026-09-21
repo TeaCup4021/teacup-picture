@@ -26,6 +26,7 @@
 | `m5-api-contract.md` | M5 Yjs 协作房间、更新日志和 checkpoint 契约 | M5-R 基础闭环 |
 | `m6-api-contract.md` | M6 片段密钥、Session 授权、讨论与批注决策 | 已实现 |
 | `backend-gap-analysis.md` | 代码事实、阻断项和后续后端工作 | 持续维护 |
+| `cache-architecture-redesign.md` | 多级缓存、失效、一致性、降级与迁移基线 | 设计基线 |
 | `ai-task-execution.md` | AI 任务 Outbox、RabbitMQ、Worker、限流和故障恢复设计 | 已实现 |
 | `picture-storage.md` | 单一 MinIO 图片存储架构、前后端边界和迁移规则 | 已实现 |
 | `ui-design/README.md` | UI v1.1 入口、页面状态与产品图索引 | 持续维护 |
