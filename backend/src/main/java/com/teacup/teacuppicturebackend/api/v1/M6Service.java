@@ -6,12 +6,14 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.teacup.teacuppicturebackend.api.v1.model.M1Dtos;
 import com.teacup.teacuppicturebackend.api.v1.model.M6Dtos;
+import com.teacup.teacuppicturebackend.cache.PublicPictureInvalidation;
 import com.teacup.teacuppicturebackend.mapper.*;
 import com.teacup.teacuppicturebackend.model.entity.*;
 import com.teacup.teacuppicturebackend.model.enums.SpaceTypeEnum;
 import com.teacup.teacuppicturebackend.service.UserService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -49,18 +51,31 @@ public class M6Service {
     private final PictureStorage storage;
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
+    private final PublicPictureInvalidation pictureInvalidation;
     private final SecureRandom random = new SecureRandom();
     private final BCryptPasswordEncoder passwords = new BCryptPasswordEncoder(11);
+
+    @Autowired
+    public M6Service(PictureMapper pictures, PictureShareMapper shares,
+                     PictureCommentMapper comments, CommentMentionMapper mentions, NotificationMapper notifications,
+                     UserMapper users, SpaceMapper spaces, SpaceUserMapper members, PublishRequestMapper publishRequests,
+                     UserService userService, SpaceAccessService access, PictureCurrentVersionService currentVersions,
+                     PictureStorage storage, StringRedisTemplate redis, ObjectMapper json,
+                     PublicPictureInvalidation pictureInvalidation) {
+        this.pictures = pictures; this.shares = shares; this.comments = comments;
+        this.mentions = mentions; this.notifications = notifications; this.users = users; this.spaces = spaces;
+        this.members = members; this.publishRequests = publishRequests; this.userService = userService;
+        this.access = access; this.currentVersions = currentVersions; this.storage = storage; this.redis = redis; this.json = json;
+        this.pictureInvalidation = pictureInvalidation;
+    }
 
     public M6Service(PictureMapper pictures, PictureShareMapper shares,
                      PictureCommentMapper comments, CommentMentionMapper mentions, NotificationMapper notifications,
                      UserMapper users, SpaceMapper spaces, SpaceUserMapper members, PublishRequestMapper publishRequests,
                      UserService userService, SpaceAccessService access, PictureCurrentVersionService currentVersions,
                      PictureStorage storage, StringRedisTemplate redis, ObjectMapper json) {
-        this.pictures = pictures; this.shares = shares; this.comments = comments;
-        this.mentions = mentions; this.notifications = notifications; this.users = users; this.spaces = spaces;
-        this.members = members; this.publishRequests = publishRequests; this.userService = userService;
-        this.access = access; this.currentVersions = currentVersions; this.storage = storage; this.redis = redis; this.json = json;
+        this(pictures, shares, comments, mentions, notifications, users, spaces, members, publishRequests,
+                userService, access, currentVersions, storage, redis, json, null);
     }
 
     public M6Dtos.ShareView activeShare(User user, long pictureId) {
@@ -170,6 +185,7 @@ public class M6Service {
         picture.setVisibility("private"); picture.setPublishStatus("withdrawn"); picture.setPublishedAt(null);
         picture.setReviewMessage("图片所有者主动撤回"); picture.setReviewTime(new Date());
         pictures.updateById(picture);
+        if (pictureInvalidation != null) pictureInvalidation.pictureChanged(pictureId);
     }
 
     public M6Dtos.CommentPage comments(User viewer, long pictureId, String cursor, HttpServletRequest request) {

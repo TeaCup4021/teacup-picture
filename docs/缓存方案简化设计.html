@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>茶杯图库 · 多级缓存方案简化设计</title>
+<style>
+  :root {
+    --ink: #1c1c1e;
+    --ink-2: #4a4a4f;
+    --ink-3: #77777e;
+    --line: #e3e3e6;
+    --line-2: #d0d0d5;
+    --bg: #fafafa;
+    --card: #ffffff;
+    --blue-bg: #E6F1FB;
+    --blue-line: #85B7EB;
+    --blue-ink: #0C447C;
+    --teal-bg: #E1F5EE;
+    --teal-line: #5DCAA5;
+    --teal-ink: #085041;
+    --amber-bg: #FAEEDA;
+    --amber-line: #EF9F27;
+    --amber-ink: #633806;
+    --red-bg: #FCEBEB;
+    --red-line: #F09595;
+    --red-ink: #791F1F;
+    --gray-bg: #F1EFE8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 48px 24px 96px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+
+  header { margin-bottom: 40px; padding-bottom: 28px; border-bottom: 2px solid var(--ink); }
+  .eyebrow { font-size: 13px; color: var(--ink-3); letter-spacing: 0.06em; margin-bottom: 10px; }
+  h1 { font-size: 30px; font-weight: 600; margin: 0 0 16px; letter-spacing: -0.01em; line-height: 1.3; }
+  .lede { font-size: 16px; color: var(--ink-2); margin: 0 0 20px; max-width: 760px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--ink-3); }
+  .meta b { color: var(--ink-2); font-weight: 500; }
+
+  h2 {
+    font-size: 21px; font-weight: 600; margin: 56px 0 18px;
+    padding-top: 20px; border-top: 1px solid var(--line);
+    letter-spacing: -0.01em;
+  }
+  h2 .num { color: var(--ink-3); font-weight: 400; margin-right: 10px; }
+  h3 { font-size: 16px; font-weight: 600; margin: 30px 0 10px; color: var(--ink); }
+  h4 { font-size: 14px; font-weight: 600; margin: 22px 0 8px; color: var(--ink-2); }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  code {
+    font-family: "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+    font-size: 13px; background: var(--gray-bg); padding: 2px 6px; border-radius: 4px;
+    color: #2C2C2A; word-break: break-all;
+  }
+  strong { font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; margin: 18px 0 22px; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; font-size: 13px; color: var(--ink-2); background: var(--gray-bg); border-bottom: 1px solid var(--line-2); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr:last-child td { border-bottom: 1px solid var(--line-2); }
+  tbody tr:hover { background: #fcfcfc; }
+  .win { color: #0F6E56; font-weight: 600; }
+  .lose { color: #A32D2D; font-weight: 600; }
+
+  pre {
+    background: #f7f7f8; border: 1px solid var(--line); border-left: 3px solid var(--line-2);
+    border-radius: 6px; padding: 16px 18px; overflow-x: auto; margin: 14px 0 20px;
+    font-family: "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+    font-size: 12.5px; line-height: 1.65; color: #26262a;
+  }
+  pre code { background: none; padding: 0; font-size: 12.5px; }
+  pre .c { color: #8a8a92; }
+  pre .k { color: #A32D2D; }
+  pre .s { color: #0F6E56; }
+
+  .cards { display: grid; gap: 14px; margin: 20px 0 24px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .card.bad { border-left: 3px solid var(--red-line); }
+  .card.good { border-left: 3px solid var(--teal-line); }
+  .card.warn { border-left: 3px solid var(--amber-line); }
+  .card-title { font-weight: 600; font-size: 15px; margin-bottom: 8px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .tag {
+    font-size: 11.5px; font-weight: 500; padding: 2px 8px; border-radius: 20px;
+    background: var(--gray-bg); color: var(--ink-2); white-space: nowrap;
+  }
+  .tag.bad { background: var(--red-bg); color: var(--red-ink); }
+  .tag.good { background: var(--teal-bg); color: var(--teal-ink); }
+  .tag.warn { background: var(--amber-bg); color: var(--amber-ink); }
+  .card p:last-child { margin-bottom: 0; }
+  .card .path { font-family: "SF Mono", Consolas, monospace; font-size: 12.5px; color: var(--ink-3); }
+
+  .callout {
+    border-radius: 10px; padding: 16px 20px; margin: 20px 0 24px; font-size: 14.5px;
+    background: var(--blue-bg); border: 1px solid var(--blue-line);
+  }
+  .callout.key { background: var(--teal-bg); border-color: var(--teal-line); }
+  .callout.risk { background: var(--red-bg); border-color: var(--red-line); }
+  .callout .label { display: block; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px; color: var(--blue-ink); }
+  .callout.key .label { color: var(--teal-ink); }
+  .callout.risk .label { color: var(--red-ink); }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout ul:last-child, .callout ol:last-child { margin-bottom: 0; }
+
+  .figure { margin: 26px 0; padding: 22px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  .figure svg { display: block; width: 100%; }
+  .figure figcaption { margin-top: 14px; font-size: 13px; color: var(--ink-3); text-align: center; }
+
+  .steps { counter-reset: step; list-style: none; padding: 0; margin: 20px 0; }
+  .steps > li {
+    counter-increment: step; position: relative; padding: 0 0 26px 52px;
+    border-left: 2px solid var(--line); margin-left: 15px;
+  }
+  .steps > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .steps > li::before {
+    content: counter(step); position: absolute; left: -16px; top: -2px;
+    width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: #fff;
+    font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;
+  }
+  .steps > li .step-h { font-weight: 600; font-size: 15px; margin-bottom: 6px; }
+
+  .kv { display: grid; grid-template-columns: 168px 1fr; gap: 6px 18px; font-size: 14px; margin: 16px 0 22px; }
+  .kv dt { color: var(--ink-2); font-weight: 500; }
+  .kv dd { margin: 0; }
+
+  .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 20px; }
+  .pill { font-size: 12.5px; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--card); }
+  .pill.del { background: var(--red-bg); border-color: var(--red-line); color: var(--red-ink); text-decoration: line-through; }
+  .pill.keep { background: var(--teal-bg); border-color: var(--teal-line); color: var(--teal-ink); }
+
+  footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-3); }
+  footer p { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">茶杯图库 · 后端设计文档</div>
+  <h1>多级缓存方案简化设计</h1>
+  <p class="lede">
+    保留「本地缓存 + 共享缓存」两层结构和跨实例失效能力，把实现从一套<b>事件驱动的分布式缓存协调协议</b>压缩成<b>共享版本号 + 本地兜底</b>。
+    类数从 17 降到 3，移除一个依赖、一张表、两个消息队列。
+  </p>
+  <div class="meta">
+    <span><b>目标</b> 三个后端实例</span>
+    <span><b>前置</b> 现有实现已通读（含调用点）</span>
+    <span><b>状态</b> 待评审</span>
+  </div>
+</header>
+
+<h2><span class="num">01</span>现状盘点</h2>
+
+<p>现有实现本身是完整的，问题在<b>成本结构与实际需求不匹配</b>。先看它动用了多少东西：</p>
+
+<table>
+  <thead>
+    <tr><th>项目</th><th class="num">数量</th><th>具体</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>缓存包 Java 类</td><td class="num">17</td><td>核心网关单文件 334 行</td></tr>
+    <tr><td>数据库对象</td><td class="num">1 表</td><td>发件箱表 10 列 + 4 索引，另含 Mapper、实体、建表脚本</td></tr>
+    <tr><td>消息中间件对象</td><td class="num">3 + 1</td><td>1 交换机、1 仲裁队列、1 死信队列，另加 1 个专用监听容器工厂</td></tr>
+    <tr><td>新增依赖</td><td class="num">1</td><td>Redisson，<b>全项目唯一用途就是这个缓存的分布式锁</b></td></tr>
+    <tr><td>Spring 容器新增 Bean</td><td class="num">4</td><td>2 个本地缓存实例 + 1 个刷新线程池 + 1 个锁客户端</td></tr>
+    <tr><td>新增配置项</td><td class="num">6</td><td>本地缓存权重、版本号本地有效期、刷新并发、轮询间隔、保留天数、确认超时</td></tr>
+    <tr><td><b>真实调用点</b></td><td class="num"><b>8</b></td><td>读 2 个（公开列表、公开详情）+ 写 6 个</td></tr>
+  </tbody>
+</table>
+
+<h3>1.1 三处已经跑歪的地方</h3>
+
+<p>这三条都在代码里可核，它们说明同一件事：<b>协议本身太复杂，复杂到自己都执行不一致。</b></p>
+
+<div class="cards">
+  <div class="card bad">
+    <div class="card-title">等待时间参数错了一个量级 <span class="tag bad">差 33 倍</span></div>
+    <p class="path">CaffeineRedisCacheGateway.java · loadSingleFlight</p>
+    <p>抢锁的等待时间配的是 150 毫秒，但等其它线程加载完成用的却是<b>租约时长 5 秒</b>。设计文档写得很清楚：等待方最多等 80～150 毫秒。实现与设计不一致，意味着一旦触发等待路径，请求会挂住 5 秒。</p>
+  </div>
+
+  <div class="card bad">
+    <div class="card-title">刷新线程池满了会让在途表永久泄漏 <span class="tag bad">可复现</span></div>
+    <p class="path">CaffeineRedisCacheGateway.java · refreshAsync</p>
+    <p>刷新线程池只有 2 个线程、队列 100，用的是默认拒绝策略，而调用处<b>没有接住拒绝异常</b>。一旦被拒绝，方法已经把「正在加载」的记录写进了进程内的在途映射表，而清理动作在任务体内部——任务从未执行，记录就永远不会被移除。后果是同一个键在后续 5 秒内固化返回 503，且这些记录长期驻留。</p>
+    <p><b>这个故障在单层方案里根本不存在</b>，因为不需要共享在途表。</p>
+  </div>
+
+  <div class="card bad">
+    <div class="card-title">本地缓存是全清的，版本号路由白设计了 <span class="tag bad">自相矛盾</span></div>
+    <p class="path">CaffeineRedisCacheGateway.java · invalidate 第一行</p>
+    <p>失效方法进门第一件事就是清空整个本地缓存。既然每次都全清，那两个键名里带的版本号（一个域名版本号、一个每图版本号）在本地层就完全没有意义了——它只对共享缓存层起作用。</p>
+    <p>这不是失误，恰恰是<b>协议太重时实现者的自然选择</b>：既然说不清该失效哪些键，就全清。而这条「猜」正好暴露了可以简化的方向。</p>
+  </div>
+</div>
+
+<h2><span class="num">02</span>简化的着力点</h2>
+
+<p>先明确<b>什么不能删</b>。三个实例意味着本地缓存之间互相看不见，因此下面每一条都是刚需：</p>
+
+<div class="pill-row">
+  <span class="pill keep">本地缓存（省共享缓存往返）</span>
+  <span class="pill keep">共享缓存（跨实例共享）</span>
+  <span class="pill keep">跨实例失效通知（本地缓存自己不会知道数据变了）</span>
+  <span class="pill keep">列表类批量失效（分页键数量无上限）</span>
+  <span class="pill keep">负值缓存（挡住不存在的编号）</span>
+  <span class="pill keep">公开与私有数据边界（安全，与缓存无关）</span>
+</div>
+
+<p>那可以动的是<b>实现这套能力的方式</b>。关键的一步判断是：</p>
+
+<div class="callout key">
+  <span class="label">核心判断</span>
+  <p><b>本地缓存自身的有效期，就是数据陈旧的上界。</b></p>
+  <p>本地缓存本来就只能活几秒到几十秒，它「必然过期」这件事保证了一致性最终会收敛——哪怕所有失效通知全部丢失。失效通知的作用是把收敛从「等过期」提前到「立刻」，它是<b>加速</b>，不是<b>正确性保证</b>。</p>
+  <p>既然通知只是加速，那它只需要「至少一次」语义。而<b>版本号自增天生满足至少一次</b>（多点自增只会让版本号多跳几下，不会错），所以围绕「恰好一次投递」建立的那一整套设施（发件箱表、轮询发布、仲裁队列、发布确认、死信队列）在这个场景里没有对应的问题要解决。</p>
+</div>
+
+<p>对比一下现状的投入产出：那套机制保证的是<b>毫秒级的通知可靠性</b>，而它保护的只是一个<b>秒级的陈旧窗口</b>。用毫秒级可靠性去保护秒级窗口，这笔账不成立。</p>
+
+<h2><span class="num">03</span>新方案总体结构与运行流程</h2>
+
+<div class="figure">
+<svg viewBox="0 0 680 400" width="100%" role="img" xmlns="http://www.w3.org/2000/svg" style="font-family:inherit">
+<title>简化后的缓存读路径与失效路径</title>
+<desc>上方是读路径，请求经过带版本号的本地缓存、共享缓存和数据库；下方是失效路径，写事务提交后只发两条命令；最下方是版本号同步。</desc>
+<defs>
+<marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+
+<text x="40" y="26" font-size="12" font-weight="600" fill="#185FA5">读路径</text>
+
+<g>
+<rect x="40" y="40" width="140" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="110" y="59" font-size="13" font-weight="600" fill="#0C447C" text-anchor="middle" dominant-baseline="central">公开读请求</text>
+<text x="110" y="77" font-size="11" fill="#185FA5" text-anchor="middle" dominant-baseline="central">列表 / 详情</text>
+</g>
+<line x1="183" y1="68" x2="213" y2="68" stroke="#185FA5" stroke-width="1.5" marker-end="url(#a2)"/>
+<g>
+<rect x="215" y="40" width="145" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="287" y="59" font-size="13" font-weight="600" fill="#0C447C" text-anchor="middle" dominant-baseline="central">本地缓存</text>
+<text x="287" y="77" font-size="11" fill="#185FA5" text-anchor="middle" dominant-baseline="central">键含版本号，命中零网络</text>
+</g>
+<line x1="363" y1="68" x2="393" y2="68" stroke="#185FA5" stroke-width="1.5" marker-end="url(#a2)"/>
+<g>
+<rect x="395" y="40" width="120" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="455" y="59" font-size="13" font-weight="600" fill="#085041" text-anchor="middle" dominant-baseline="central">共享缓存</text>
+<text x="455" y="77" font-size="11" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">跨实例共享</text>
+</g>
+<line x1="518" y1="68" x2="548" y2="68" stroke="#0F6E56" stroke-width="1.5" marker-end="url(#a2)"/>
+<g>
+<rect x="550" y="40" width="90" height="56" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+<text x="595" y="59" font-size="13" font-weight="600" fill="#444441" text-anchor="middle" dominant-baseline="central">数据库</text>
+<text x="595" y="77" font-size="11" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">事实来源</text>
+</g>
+
+<text x="40" y="128" font-size="12" fill="#77777e">本地缓存的有效期只作为兜底；失效通知负责把收敛从「等过期」提前到「立刻」</text>
+
+<text x="40" y="176" font-size="12" font-weight="600" fill="#854F0B">失效路径（写事务提交之后）</text>
+
+<g>
+<rect x="40" y="190" width="150" height="60" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="115" y="211" font-size="13" font-weight="600" fill="#633806" text-anchor="middle" dominant-baseline="central">业务写事务</text>
+<text x="115" y="230" font-size="11" fill="#854F0B" text-anchor="middle" dominant-baseline="central">审核 / 撤回 / 编辑</text>
+</g>
+<line x1="193" y1="220" x2="223" y2="220" stroke="#854F0B" stroke-width="1.5" marker-end="url(#a2)"/>
+<g>
+<rect x="225" y="190" width="170" height="60" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="310" y="211" font-size="13" font-weight="600" fill="#633806" text-anchor="middle" dominant-baseline="central">版本号加一</text>
+<text x="310" y="230" font-size="11" fill="#854F0B" text-anchor="middle" dominant-baseline="central">让列表类与本机缓存失效</text>
+</g>
+<line x1="398" y1="220" x2="428" y2="220" stroke="#854F0B" stroke-width="1.5" marker-end="url(#a2)"/>
+<g>
+<rect x="430" y="190" width="210" height="60" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="535" y="211" font-size="13" font-weight="600" fill="#633806" text-anchor="middle" dominant-baseline="central">删除该图详情键</text>
+<text x="535" y="230" font-size="11" fill="#854F0B" text-anchor="middle" dominant-baseline="central">只影响这一张图，其它不受扰</text>
+</g>
+
+<text x="40" y="292" font-size="12" font-weight="600" fill="#0F6E56">版本号同步（各实例独立进行）</text>
+
+<g>
+<rect x="40" y="306" width="600" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="340" y="326" font-size="13" font-weight="600" fill="#085041" text-anchor="middle" dominant-baseline="central">每个实例每 500 毫秒读取一次版本号，读不到就沿用上一次的值</text>
+<text x="340" y="344" font-size="11" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">收敛窗口不超过 500 毫秒，不引入任何中间件</text>
+</g>
+</svg>
+<figcaption>新方案：失效从一条消息链路退化成两条缓存命令，跨实例同步退化成一次轮询读取</figcaption>
+</div>
+
+<h3>3.1 三条路径的具体规则</h3>
+
+<table>
+  <thead>
+    <tr><th>数据</th><th>本地缓存键</th><th>共享缓存键</th><th>失效方式</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>图片详情</b></td>
+      <td><code>版本号:公开图片详情:id=123</code></td>
+      <td><code>tp:cache:公开图片详情:id=123</code></td>
+      <td>删除精确键（一条命令）</td>
+    </tr>
+    <tr>
+      <td><b>图库列表</b></td>
+      <td><code>版本号:公开列表:游标:每页条数</code></td>
+      <td><code>tp:cache:公开列表:版本号:游标:每页条数</code></td>
+      <td>版本号加一，旧键自然过期</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>这里有一个关键的设计选择：<b>详情类用「删除精确键」，列表类用「版本号」</b>。</p>
+
+<ul>
+  <li><b>详情键的数量是有界的</b>——一本图库里有多少张公开图片，就有多少个键，而且每个键对应一个明确的对象。数据变了就删那个键，一条命令，影响面精确到一张图。</li>
+  <li><b>列表键的数量没有上界</b>——游标和每页条数的组合会持续增长，没法枚举，所以必须靠版本号整体切换。</li>
+</ul>
+
+<p>现状给详情类也套了「每张图一个版本号」，为此要在共享缓存里维护和图片数量等量的版本号键，读的时候还要多一次网络往返去取版本号。用精确删除可以<b>完全省掉这一层</b>，同时效果一样（只失效那一张图）。</p>
+
+<h3>3.2 查询流程</h3>
+
+<p>数据分两类，流程只在共享缓存键的构成上不同，其余完全一致。</p>
+
+<h4>图片详情（读第 123 张公开图片）</h4>
+
+<table>
+  <thead>
+    <tr><th class="num">步骤</th><th>动作</th><th>开销</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="num">0</td><td>读内存中的版本号（各实例每 500 毫秒同步一次）</td><td>无</td></tr>
+    <tr><td class="num">1</td><td>拼本地缓存键：版本号 + 缓存名 + 编号</td><td>无</td></tr>
+    <tr><td class="num">2</td><td>查本地缓存。命中直接返回；未命中进入加载</td><td>无</td></tr>
+    <tr><td class="num">3</td><td>加载时读共享缓存。命中则反序列化、回填本地、返回</td><td>一次往返</td></tr>
+    <tr><td class="num">4</td><td>共享缓存也未命中则查数据库（两次主键查询）</td><td>一次数据库查询</td></tr>
+    <tr><td class="num">5</td><td>结果写入共享缓存（有效期加随机抖动）并回填本地，返回</td><td>一次往返</td></tr>
+  </tbody>
+</table>
+
+<p>三个值得注意的细节：</p>
+
+<ol>
+  <li><b>同一进程内，同一个键只会有一个线程执行加载</b>，其余并发线程挂在同一个结果上等待。这是本地缓存的加载方法自带的能力，不需要自己维护一张进程内加载表——现有实现的在途表及其泄漏缺陷就是这样省掉的。</li>
+  <li><b>负值会落两层缓存</b>。数据库判定为「不存在或不可公开」时，本地缓存记负值标记，共享缓存记短有效期（15 秒）负值，避免同一个不存在的编号被反复穿透到数据库。</li>
+  <li><b>共享缓存异常一律按未命中处理</b>，直接回源，不返回陈旧值。这一层不保留陈旧态，是为了省掉双时间戳与后台刷新两套机制。</li>
+</ol>
+
+<h4>图库列表</h4>
+
+<p>只有一处不同：共享缓存键包含版本号。</p>
+
+<pre><code>tp:cache:public:public-picture-list:g{版本号}:cursor={游标}:limit={条数}</code></pre>
+
+<h4>为什么详情不含版本号，而列表含</h4>
+
+<table>
+  <thead>
+    <tr><th>数据</th><th>共享缓存键</th><th>理由</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>详情</td>
+      <td>不含版本号</td>
+      <td>键数量有界且与对象一一对应，任意实例都能精确删除，版本号是多余的；不含版本号还省掉读取时的一次网络往返</td>
+    </tr>
+    <tr>
+      <td>列表</td>
+      <td>含版本号</td>
+      <td>游标与每页条数的组合没有上界，无法枚举删除，只能整体切换版本号</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><b>而本地缓存的键一定含版本号</b>，且这一点与详情还是列表无关。原因是本地缓存既无法被其它实例精确清理，也没有枚举自己全部键的能力。把版本号放进键里之后，版本号一变，旧键就再也不会被读到，等同于整体失效，且不需要遍历清理。残留的旧键由有效期与容量上限回收。</p>
+
+<h3>3.3 一致性模型</h3>
+
+<p><b>先把立场定死：有界最终一致，不是强一致。</b>公开图库接受一个有明确上界的陈旧窗口；私有权限、分享口令、会话状态不依赖缓存做判断。保障分三层，另有一个必须承认的缺口。</p>
+
+<h4>第一层：顺序 —— 失效动作必须在事务提交之后</h4>
+
+<p>写路径的固定顺序：</p>
+
+<pre><code>开启事务 → 更新业务表 → <span class="k">提交事务</span> → 删除共享缓存的详情键 → 版本号加一</code></pre>
+
+<p>如果把失效放在提交之前，会撞上一个<b>必然发生</b>的竞态：</p>
+
+<pre><code>A 开启事务、更新数据（尚未提交）
+A 删除缓存
+B 读缓存未命中，回源数据库，读到的是旧值
+B 把旧值写入缓存
+A 提交
+<span class="c">结果：缓存里留存的旧值不会自行纠正</span></code></pre>
+
+<p>所以失效动作统一挂在事务提交回调上。现有实现同样遵守这条约束（发件箱记录写在事务内，真正的失效在提交后触发），新方案保留它，只是把提交后要做的事从「写表、等轮询、发消息、被消费」缩短为「直接发两条命令」。</p>
+
+<h4>第二层：时机 —— 提交后立即失效</h4>
+
+<table>
+  <thead>
+    <tr><th>命令</th><th>作用范围</th><th>生效方式</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>删除详情键</td><td>单张图片的详情</td><td>下一次读该图时共享缓存未命中，回源取新值</td></tr>
+    <tr><td>版本号加一</td><td>列表缓存 + 三个实例的本地缓存</td><td>旧键不再被访问，等效于整体失效</td></tr>
+  </tbody>
+</table>
+
+<p>两条命令正常情况下在 1 毫秒内完成，各实例在不超过 500 毫秒内感知版本号变化。<b>因此不一致窗口约为 1 毫秒，加上本地缓存感知版本号的最长 500 毫秒。</b></p>
+
+<p>500 毫秒这一档是参数，不是架构：把同步间隔降到 100 毫秒即可压缩它，代价是每个实例每秒多 10 次极小的读操作。只有当业务要求亚百毫秒收敛时，才需要改回事件推送。</p>
+
+<h4>第三层：兜底 —— 有效期</h4>
+
+<p>任何一步失败都不会造成永久错误，只会延长陈旧时间。</p>
+
+<table>
+  <thead>
+    <tr><th>失效环节的失败情况</th><th class="num">陈旧上界</th><th>兜底机制</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>两条命令均失败</td><td class="num">60 秒</td><td>本地缓存有效期</td></tr>
+    <tr><td>仅版本号失败</td><td class="num">60 秒</td><td>本地缓存有效期与列表共享缓存有效期</td></tr>
+    <tr><td>仅详情删除失败</td><td class="num">60 秒</td><td>详情共享缓存有效期</td></tr>
+  </tbody>
+</table>
+
+<h4>必须承认的缺口：旧读回填覆盖删除</h4>
+
+<div class="callout risk">
+  <span class="label">无法靠提交后失效消除的竞态</span>
+<pre style="margin:0;background:transparent;border:none;padding:0;font-size:12.5px"><code>B 读共享缓存未命中
+B 回源数据库，读到旧值（此时 A 尚未提交）
+A 提交事务
+A 删除详情键
+B 把刚读到的旧值写入共享缓存
+结果：该图详情以旧值驻留，直到有效期结束</code></pre>
+</div>
+
+<p><b>这个竞态在现有实现里是免疫的</b>，因为它的详情键包含每张图自己的版本号：B 写回的是旧版本号对应的键，而 A 抬升版本号之后，后续读取使用新版本号，读不到 B 写回的那个键，于是回源取到新值。换句话说，现有的每图版本号是用「每次读多一次网络往返 + 维护与图片数量等量的版本号键」换来了对这个竞态的免疫。</p>
+
+<h4>量化这次退步</h4>
+
+<dl class="kv">
+  <dt>触发窗口</dt>
+  <dd>读请求从读到旧值到写回缓存的耗时，约 2～3 毫秒</dd>
+  <dt>变更频率</dt>
+  <dd>图片公开状态变更为管理员人工操作，按高峰每分钟 10 次估算，每秒 0.17 次</dd>
+  <dt>窗口占比</dt>
+  <dd>0.17 × 0.003 ≈ 0.05%</dd>
+  <dt>再乘命中概率</dt>
+  <dd>该请求恰好读的是刚变更那张图，按 1/500 估算</dd>
+  <dt>结论</dt>
+  <dd>单次变更造成覆盖的概率约 10⁻⁶ 量级；按每天 1000 次变更，数百年一遇，且后果仅为旧值多驻留一个有效期</dd>
+</dl>
+
+<h4>判据</h4>
+
+<table>
+  <thead>
+    <tr><th>条件</th><th>选择</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>变更频率低于每秒 1 次，且有效期不超过 60 秒</td>
+      <td>用精确删除。不值得为这个竞态付出与图片数量等量的状态，以及每次读多一次往返</td>
+    </tr>
+    <tr>
+      <td>变更频率达到每秒数十次以上（批量导入、自动审核）</td>
+      <td>改用含版本号的详情键。此时「任何变更使全部详情失效」的代价被高频变更本身抵消，免疫竞态成为净收益</td>
+    </tr>
+    <tr>
+      <td>变更频率仍然很低，但业务不接受 60 秒的最坏窗口</td>
+      <td>把详情共享缓存有效期降到 10 秒。零代码成本的调节旋钮，代价是命中率略降</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>与「事务发件箱」的对比</h4>
+
+<p>一个容易混淆的点：发件箱保证的是<b>失效命令一定会被执行</b>，它<b>不解决</b>上面那个「删除之后又被旧值回填」的竞态——该竞态与命令是否可靠无关。</p>
+
+<p>因此现有实现的可靠性优势仅限于「命令不丢」，而新方案用有效期兜底覆盖了同一件事：缓存本身可以重建，命令丢了也只是延迟收敛，不是永久错误。两者终点相同，差别只在时间上界（现有实现是重试间隔，新方案是有效期）。</p>
+
+<div class="callout key">
+  <span class="label">结论</span>
+  <p>现有实现真正的一致性优势在<b>每图版本号</b>那一层，而不在发件箱那一层。这次简化动的是前者，发件箱只是顺带移除。</p>
+</div>
+
+<h3>3.4 版本号承担的两个职责</h3>
+
+<p>承接上文——版本号没有被简化掉，是因为它同时在解决两个不同的问题。先明确它是什么：<b>它不是缓存值，也不是数据，而是一个计数器，全部作用只有一句话——定义一个命名空间前缀。</b>所有键挂在当前命名空间下，版本号一变，全体请求自动切到新命名空间，旧键立刻失去访问者。</p>
+
+<h4>职责一：让无法枚举的键集合整体失效</h4>
+
+<p>列表键由「游标 × 每页条数」组合而成，数量没有上界。图片审核通过后所有列表内容都变了，但无法枚举出要删除哪些键。用通配符扫描删除的代价与键数量成正比，还会占用共享缓存的执行线程。改用版本号只需切换前缀，<b>成本与键数量无关</b>。</p>
+
+<h4>职责二：让本地缓存能被跨实例失效</h4>
+
+<p>本地缓存无法被其它实例精确清理。若要精确清理，必须把「哪些键变了」推送给每个实例，那就需要消息队列与事件载荷。而版本号推送的是「现在用几号」这一个整数，各实例自行切换。</p>
+
+<div class="callout key">
+  <span class="label">这是推送架构能退化成轮询的根因</span>
+  <p>跨实例传输的信息量从<b>一批键名</b>降到了<b>一个整数</b>。信息量降下来之后，才可以不再依赖消息链路，改成周期性读取。</p>
+</div>
+
+<h4>一个必须说清的代价</h4>
+
+<p>本地缓存键一律含版本号，意味着任意一张图片变更都会让三个实例的本地详情缓存<b>整体换号，等效于全清</b>——这正是现有实现中「失效方法进门先清空本地缓存」的效果，只是换号不需要遍历清理，成本更低。代价是写入频繁时本地缓存命中率下降，调节手段见第 08 节的判据。</p>
+
+<h4>三个容易写错的点</h4>
+
+<ol>
+  <li><b>版本号不保证一致性，只保证失效能生效。</b>若版本号忘记递增，列表缓存会一直使用旧值直到有效期结束。所以版本号机制本身也依赖有效期兜底，两者缺一不可。</li>
+  <li><b>读不到版本号时不能退回 0。</b>共享缓存抖动导致读取失败时，退回 0 会切回一个早已废弃的命名空间；若那批旧键尚在，就会读到极旧的数据。正确做法是沿用内存中上一次的值，等下一轮同步再更新。</li>
+  <li><b>它不参与数据校验。</b>现有实现的缓存值里也存了一份版本号，读取时做二次比对。新方案去掉这层：版本号已经在键里，键对不上就读不到，值里再存一份属于冗余。</li>
+</ol>
+
+<h4>为什么不用时间戳代替</h4>
+
+<p>时间戳同样可以充当命名空间，但它依赖各实例时钟一致，且同一秒内的多次变更无法区分。计数器由共享缓存单点递增，天然单调、全局有序、不依赖时钟。两者状态量都是常数级，但计数器的语义更准确。</p>
+
+<h2><span class="num">04</span>四道取舍及其判据</h2>
+
+<p>下面每一条都是「删掉某项能力」，我把判据一并写出来——判据比结论重要，因为条件变了结论就该跟着变。</p>
+
+<h3>4.1 删掉分布式锁：判据是回源成本</h3>
+
+<div class="callout">
+  <span class="label">回源到底有多贵</span>
+  <p>公开详情的回源是一次图片主键查询加一次作者主键查询，都是主键等值查询，单次在<b>1 毫秒量级</b>。去掉跨实例锁之后，最坏情况是最多三个实例各回源一次，也就是<b>约 3 毫秒的额外数据库负载</b>，而且只在缓存刚过期的瞬间发生。</p>
+  <p>而锁的代价是：一个新依赖、一套租约管理、三个降级分支、一个等待循环，以及前面发现的<b>等待超时参数错误</b>和<b>抢不到锁直接返回 503</b> 两个故障面，合计约 120 行。</p>
+</div>
+
+<p><b>结论：回源是主键查询时不要锁。</b>什么时候必须加回来？当回源变成慢查询（没有命中索引的聚合、多表联结）、外部接口调用、或昂贵计算时——那时回源的代价从 1 毫秒变成几十到几百毫秒，三个实例同时打过去就值得协调了。届时用共享缓存的一条「键不存在则设置、带租约」命令即可（约 20 行），不需要引入锁框架。</p>
+
+<h3>4.2 删掉事务发件箱：判据是事件语义</h3>
+
+<div class="callout">
+  <span class="label">发件箱解决的是什么问题</span>
+  <p>发件箱解决的是「业务事务提交了，但事件没发出去 / 发重复了」。它的价值体现在<b>事件必须被处理</b>的场景——比如 AI 任务派发：事件丢了，用户的任务永远不会被执行，这是不可接受的。</p>
+  <p>而缓存失效通知丢了的后果是：某个实例的本地缓存多存活几秒，然后自行过期。这<b>没有正确性后果</b>。</p>
+</div>
+
+<p>进一步说，版本号自增这个操作本身就是<b>幂等的「至少一次」语义</b>：三个实例同时加、加了两次、发送方重试导致加三次，结果都只是版本号多跳几位，不会有任何实例读到错误数据。为一个天生幂等且不要求恰好一次的操作，建立一套保证恰好一次投递的设施，是不匹配的。</p>
+
+<div class="callout risk">
+  <span class="label">能力下降要认</span>
+  <p>删掉发件箱确实丢掉一项能力：<b>「删除详情键」这条命令如果执行失败，现状有后台重试兜底，新方案没有</b>。补偿手段是把关键失效重试一次，并把共享缓存的详情有效期设为 60 秒——即最坏情况下一张已撤回的图片详情还会正确返回 60 秒。这个窗口是否符合你的业务要求，需要你确认。</p>
+</div>
+
+<p><b>面试叙事不受影响</b>：事务发件箱在 AI 任务链路上是完整保留的（那个场景里它确实必需）。缓存侧改成「不需要发件箱」，而且能说清<b>为什么这里不需要</b>，比「到处都用发件箱」更有说服力——它证明的是判据能力，不是工具熟练度。</p>
+
+<h3>4.3 删掉软硬双期与后台刷新：判据是阻塞上界</h3>
+
+<div class="callout">
+  <span class="label">后台刷新换来的是什么</span>
+  <p>软硬双期加后台刷新，解决的是「缓存逻辑过期后，第一个请求要阻塞着去加载新值」。它换来的是<b>请求不阻塞</b>。</p>
+  <p>那么阻塞上界是多少？共享缓存命中约 0.3 毫秒；回源约 1 毫秒。也就是<b>最坏 1 毫秒级的阻塞</b>。为了省掉这 1 毫秒，付出了：一个刷新线程池、一张进程内在途表、软硬两个时间戳、五种读取状态，以及前面提到的<b>线程池拒绝导致在途表泄漏</b>这个真实缺陷。</p>
+</div>
+
+<p><b>结论：阻塞上界在毫秒级时，不值得为异步刷新付出这些复杂度。</b>当回源变成几十毫秒以上（外部接口、复杂计算）时，软过期加后台刷新才划算，那时再引入。</p>
+
+<h3>4.4 保留版本号，但只保留一个：判据是失效粒度与登记成本</h3>
+
+<p>现状用了两级版本号：一个目录级（列表用）+ 每图一个（详情用）。新方案<b>只保留目录级这一个</b>，详情改用精确删除。</p>
+
+<p>现在跨实例需要同步的版本号从「图片数量 + 1」个降到<b>1 个</b>。这一步是整份方案能简化的枢纽——只有当需要同步的东西少到可以列举时，「轮询读取」才是可行的；每张图一个版本号时，你只能靠事件推送告诉各实例「该读哪个版本号」，那就必然需要消息链路。</p>
+
+<div class="callout key">
+  <span class="label">一句话概括这次简化</span>
+  <p>把「需要同步的状态」从 <b>O(图片数量)</b> 降到 <b>O(1)</b>，于是推送架构（发件箱 + 队列 + 消费者）整体退化成一次廉价的轮询读取。</p>
+</div>
+
+<h2><span class="num">05</span>新旧对照</h2>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>现状</th><th>新方案</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>缓存相关 Java 类</td><td class="num">17</td><td class="num win">3</td></tr>
+    <tr><td>核心代码行数</td><td class="num">约 1050</td><td class="num win">约 200</td></tr>
+    <tr><td>新增依赖</td><td class="num">Redisson</td><td class="num win">无</td></tr>
+    <tr><td>数据库对象</td><td class="num">1 表 + 3 索引</td><td class="num win">0（新增一句删表）</td></tr>
+    <tr><td>消息中间件对象</td><td class="num">1 交换机 + 2 队列</td><td class="num win">0</td></tr>
+    <tr><td>Spring 容器新增 Bean</td><td class="num">4</td><td class="num win">1</td></tr>
+    <tr><td>配置项</td><td class="num">6</td><td class="num win">2</td></tr>
+    <tr><td>定时任务</td><td class="num">2（轮询发布 + 清理）</td><td class="num win">1（同步版本号）</td></tr>
+    <tr><td>读取状态种类</td><td class="num">5 种</td><td class="num win">3 种（命中 / 未命中 / 负值）</td></tr>
+    <tr><td>本地时效</td><td class="num">软 + 硬 双期</td><td class="num win">单期</td></tr>
+    <tr><td>失效收敛窗口</td><td class="num">事件路径即时，承诺 5 秒</td><td class="num">不超过 500 毫秒</td></tr>
+    <tr><td>本地命中时的网络调用</td><td class="lose">仍需读取版本号</td><td class="win">零调用</td></tr>
+    <tr><td>跨实例回源次数</td><td class="num">1</td><td class="num lose">最多 3</td></tr>
+    <tr><td>共享缓存故障时的本地兜底</td><td class="num">需先读到版本号</td><td class="win">完全独立，撑满本地有效期</td></tr>
+  </tbody>
+</table>
+
+<p>两处变差（跨实例回源最多 3 次、失去删除失败的自动重试）在前一节都给了量化，并标注了该在什么条件下加回来。</p>
+
+<h2><span class="num">06</span>代码骨架</h2>
+
+<p>三个类，可以在现有包结构下直接落地。</p>
+
+<h3>6.1 本地缓存的配置</h3>
+
+<pre><code><span class="c">// config/PublicReadCacheConfig.java</span>
+<span class="k">@Configuration</span>
+<span class="k">public class</span> PublicReadCacheConfig {
+
+    <span class="k">@Bean</span>(<span class="s">"publicReadLocalCache"</span>)
+    <span class="k">public</span> Cache&lt;String, Object&gt; publicReadLocalCache(
+            <span class="k">@Value</span>(<span class="s">"${teacup.cache.local.max-size:20000}"</span>) <span class="k">long</span> maxSize) {
+        <span class="k">return</span> Caffeine.newBuilder()
+                .maximumSize(Math.max(1L, maxSize))
+                .expireAfterWrite(60, TimeUnit.SECONDS)   <span class="c">// 只作兜底，正常靠版本号切换</span>
+                .build();
+    }
+}</code></pre>
+
+<p>注意这里<b>不需要权重计算器</b>。它的作用是按对象大小而非条目数控制内存，但缓存值都是几百字节量级的图片元数据，条目数上限已经足够控制内存，省掉一段每次写入都要跑的序列化开销。</p>
+
+<h3>6.2 版本号</h3>
+
+<pre><code><span class="c">// cache/CacheGeneration.java</span>
+<span class="k">@Component</span>
+<span class="k">public class</span> CacheGeneration {
+
+    <span class="k">private static final</span> String CATALOG_KEY = <span class="s">"tp:cache:gen:catalog"</span>;
+
+    <span class="k">private final</span> StringRedisTemplate redis;
+    <span class="k">private volatile long</span> catalog = 0L;
+
+    <span class="c">/** 每个实例独立轮询；读不到就沿上一次的值，绝不退回 0。 */</span>
+    <span class="k">@Scheduled</span>(fixedDelayString = <span class="s">"${teacup.cache.generation-sync-millis:500}"</span>)
+    <span class="k">public void</span> sync() {
+        String raw;
+        <span class="k">try</span> {
+            raw = redis.opsForValue().get(CATALOG_KEY);
+        } <span class="k">catch</span> (RuntimeException unavailable) {
+            <span class="k">return</span>;   <span class="c">// 共享缓存抖动时保持现状，本地缓存继续服务</span>
+        }
+        <span class="k">if</span> (raw == <span class="k">null</span> || raw.isBlank()) <span class="k">return</span>;
+        <span class="k">try</span> {
+            catalog = Long.parseLong(raw);
+        } <span class="k">catch</span> (NumberFormatException ignored) {
+            <span class="c">// 值被外部污染时不动，等下一次轮询</span>
+        }
+    }
+
+    <span class="k">public long</span> catalog() { <span class="k">return</span> catalog; }   <span class="c">// volatile 读，无同步开销</span>
+
+    <span class="c">/** 写事务提交后调用：先落共享缓存，再抬版本号，顺序不能反。 */</span>
+    <span class="k">public void</span> bumpCatalog() {
+        Long next = redis.opsForValue().increment(CATALOG_KEY);
+        <span class="k">if</span> (next != <span class="k">null</span>) catalog = next;
+    }
+}</code></pre>
+
+<h3>6.3 读路径</h3>
+
+<pre><code><span class="c">// cache/PublicReadCache.java</span>
+<span class="k">@Component</span>
+<span class="k">public class</span> PublicReadCache {
+
+    <span class="k">private static final</span> Object ABSENT = <span class="k">new</span> Object();   <span class="c">// 负值哨兵</span>
+    <span class="k">private static final</span> String PREFIX = <span class="s">"tp:cache:public:"</span>;
+
+    <span class="k">private final</span> Cache&lt;String, Object&gt; local;
+    <span class="k">private final</span> StringRedisTemplate redis;
+    <span class="k">private final</span> ObjectMapper json;
+    <span class="k">private final</span> CacheGeneration generation;
+
+    <span class="c">/** 详情：共享缓存键不含版本号，失效靠精确删除。 */</span>
+    <span class="k">public</span> &lt;T&gt; T detail(String name, <span class="k">long</span> id, Class&lt;T&gt; type, Supplier&lt;T&gt; loader) {
+        String key = generation.catalog() + <span class="s">":"</span> + name + <span class="s">":id="</span> + id;
+        Object cached = local.get(key, ignored -&gt; loadDetail(name, id, type, loader));
+        <span class="k">return</span> cached == ABSENT ? <span class="k">null</span> : type.cast(cached);
+    }
+
+    <span class="c">/** 列表：共享缓存键含版本号，失效靠版本号切换。 */</span>
+    <span class="k">public</span> &lt;T&gt; T list(String name, String cursorKey, Class&lt;T&gt; type, Supplier&lt;T&gt; loader) {
+        String key = generation.catalog() + <span class="s">":"</span> + name + <span class="s">":"</span> + cursorKey;
+        <span class="k">return</span> type.cast(local.get(key, ignored -&gt; loadList(name, cursorKey, type, loader)));
+    }
+
+    <span class="k">private</span> &lt;T&gt; Object loadDetail(String name, <span class="k">long</span> id, Class&lt;T&gt; type, Supplier&lt;T&gt; loader) {
+        String key = PREFIX + name + <span class="s">":id="</span> + id;
+        T fromShared = read(key, type);
+        <span class="k">if</span> (fromShared != <span class="k">null</span>) <span class="k">return</span> fromShared;
+        T loaded = loader.get();                        <span class="c">// 返回 null 表示不存在</span>
+        write(key, loaded, DETAIL_TTL);
+        <span class="k">return</span> loaded == <span class="k">null</span> ? ABSENT : loaded;
+    }
+
+    <span class="k">private</span> &lt;T&gt; Object loadList(String name, String cursorKey, Class&lt;T&gt; type, Supplier&lt;T&gt; loader) {
+        String key = PREFIX + name + <span class="s">":g"</span> + generation.catalog() + <span class="s">":"</span> + cursorKey;
+        T fromShared = read(key, type);
+        <span class="k">if</span> (fromShared != <span class="k">null</span>) <span class="k">return</span> fromShared;
+        T loaded = loader.get();
+        write(key, loaded, LIST_TTL);
+        <span class="k">return</span> loaded;
+    }
+
+    <span class="c">/** 共享缓存异常一律当作未命中，直接回源，不做陈旧值兜底。 */</span>
+    <span class="k">private</span> &lt;T&gt; T read(String key, Class&lt;T&gt; type) {
+        <span class="k">try</span> {
+            String raw = redis.opsForValue().get(key);
+            <span class="k">return</span> raw == <span class="k">null</span> ? <span class="k">null</span> : json.readValue(raw, type);
+        } <span class="k">catch</span> (Exception unavailable) {
+            <span class="k">return null</span>;
+        }
+    }
+
+    <span class="k">private void</span> write(String key, Object value, Duration ttl) {
+        <span class="k">if</span> (value == <span class="k">null</span>) { redis.delete(key); <span class="k">return</span>; }   <span class="c">// 负值不落共享缓存</span>
+        <span class="k">try</span> {
+            <span class="k">long</span> jitter = ThreadLocalRandom.current().nextLong(ttl.toMillis() / 5 + 1);
+            redis.opsForValue().set(key, json.writeValueAsString(value),
+                    ttl.toMillis() + jitter, TimeUnit.MILLISECONDS);
+        } <span class="k">catch</span> (Exception unavailable) {
+            <span class="c">// 写不进去不影响本次返回</span>
+        }
+    }
+}</code></pre>
+
+<div class="callout">
+  <span class="label">这个实现里最省事的一处</span>
+  <p><code>local.get(key, 加载函数)</code> 这一步同时完成了两件事：查本地缓存，以及<b>同一进程内同一键只允许一个线程执行加载</b>。现状用了一张进程在途表、一个异步任务句柄、一套超时等待来实现同样的实例内单飞，并且因此产生了泄漏缺陷。这里一行代替。</p>
+</div>
+
+<h3>6.4 失效</h3>
+
+<pre><code><span class="c">// cache/PublicPictureInvalidation.java</span>
+<span class="k">@Component</span>
+<span class="k">public class</span> PublicPictureInvalidation {
+
+    <span class="k">private final</span> StringRedisTemplate redis;
+    <span class="k">private final</span> CacheGeneration generation;
+
+    <span class="c">/** 必须在其业务写事务提交之后调用。 */</span>
+    <span class="k">public void</span> pictureChanged(<span class="k">long</span> pictureId) {
+        <span class="k">try</span> {
+            redis.delete(DETAIL_PREFIX + pictureId);   <span class="c">// 先删详情，再抬版本号</span>
+        } <span class="k">catch</span> (RuntimeException unavailable) {
+            <span class="c">// 删不掉时详情仍会在有效期后自行收敛</span>
+        }
+        generation.bumpCatalog();
+    }
+}</code></pre>
+
+<p>调用点不变，还是现有那 6 处，把 <code>recordPublicPictureChange(id, true)</code> 换成 <code>pictureChanged(id)</code> 即可。同时可以删掉那层兼容用的观察者适配器——它做的事就是转调这个方法。</p>
+
+<div class="callout risk">
+  <span class="label">顺序有讲究</span>
+  <p>必须先删详情键、再抬版本号。反过来的话存在一个很窄的窗口：版本号已经抬了，但旧详情键还在，此时某个实例读到的是旧键里的旧值——虽然它很快会因版本号切换而不再访问该键，但这属于可以避免的窗口，按正确顺序写就没有。</p>
+</div>
+
+<h2><span class="num">07</span>迁移步骤</h2>
+
+<ol class="steps">
+  <li>
+    <div class="step-h">并行上线，不动存量</div>
+    <p>新增三个类与本地缓存配置，与现有网关共存。此时新代码不参与任何请求，可以先用单元测试验证版本号切换、负值、共享缓存异常降级三条路径。</p>
+  </li>
+  <li>
+    <div class="step-h">切换两个读点</div>
+    <p>把公开列表与公开详情两个调用点切到新实现，写侧同步切到新的失效方法。这一步之后新旧两套都会收到失效动作，但旧的那套已经没有读流量，属于静默状态。</p>
+    <p><b>观察一周</b>：本地与共享缓存的命中率、接口响应时间的百分位、数据库回源比例。重点确认命中率没有因为本地缓存有效期变化而下滑。</p>
+  </li>
+  <li>
+    <div class="step-h">停用旧链路</div>
+    <p>移除旧的失效事件消费者与发布器的容器注册，观察消息队列是否有积压（应该只有 AI 任务那套在跑）。确认无积压后，删掉发件箱轮询任务。</p>
+  </li>
+  <li>
+    <div class="step-h">清理</div>
+    <p>删除缓存包下 14 个类、发件箱的实体与数据访问层、以及消息配置类里属于缓存的部分；新增一条迁移脚本删除发件箱表；从依赖中移除锁框架；清理不再使用的 4 个配置项。</p>
+  </li>
+</ol>
+
+<p>第 2 步之后系统已完全由新实现承载，后面两步都是纯粹的清理，任何一步都可以停住而不影响功能——这让整个迁移过程是可回滚的。</p>
+
+<h2><span class="num">08</span>遗留风险与加回条件</h2>
+
+<table>
+  <thead>
+    <tr><th>风险</th><th class="num">最坏影响</th><th>加回来的条件</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>删除详情键失败且无重试</td>
+      <td class="num">已撤回图片仍可见，最长 60 秒</td>
+      <td>业务不接受 60 秒窗口时，把共享缓存有效期降到 10 秒，或补一次重试</td>
+    </tr>
+    <tr>
+      <td>版本号抬升使本地缓存整体切换</td>
+      <td class="num">写入频繁时本地命中率下降</td>
+      <td>写入速率超过读取速率的百分之一时，把版本号按编号分片成 16 个桶</td>
+    </tr>
+    <tr>
+      <td>三个实例可能同时回源</td>
+      <td class="num">数据库瞬时负载约 3 倍</td>
+      <td>回源耗时超过 50 毫秒（加了慢查询或外部调用）时，加一条带租约的创建命令</td>
+    </tr>
+    <tr>
+      <td>共享缓存整体不可用</td>
+      <td class="num">全部请求回源；本地命中仍可服务</td>
+      <td>数据库连接池小于 30 时，给回源加一个信号量限流</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>这几条都写成了可观测的触发条件，而不是「以后再说」。建议把命中率、回源比例、版本号当前值三个指标接到监控上，条件满足时能够被发现。</p>
+
+<h2><span class="num">09</span>这次简化的面试口径</h2>
+
+<p>不要讲成「我删掉了一堆代码」。要讲成一个<b>用判据做取舍的决策过程</b>，落点在这四句上：</p>
+
+<div class="cards">
+  <div class="card good">
+    <div class="card-title">第一句：说清前提</div>
+    <p>三个实例意味着本地缓存互相看不见，所以分层和跨实例失效都是必需的，不能删。能优化的是实现这套能力的方式。</p>
+  </div>
+  <div class="card good">
+    <div class="card-title">第二句：给出枢纽判断</div>
+    <p>本地缓存的有效期本身就是数据陈旧的上界，所以失效通知只是加速收敛，不是正确性保证。它只需要「至少一次」语义——而版本号自增天生满足至少一次，于是发件箱、消息队列、死信队列那一整套为「恰好一次」建立的设施就没有对应的问题要解决。</p>
+  </div>
+  <div class="card good">
+    <div class="card-title">第三句：把状态量降下来</div>
+    <p>原来每张图片一个版本号，需要同步的状态是图片数量级，只能靠事件推送告诉各实例读哪个版本号。把详情类改成精确删除之后，需要同步的只剩一个目录版本号，推送架构就退化成一次廉价的轮询读取。</p>
+  </div>
+  <div class="card good">
+    <div class="card-title">第四句：给出量化对比</div>
+    <p>删掉跨实例锁的代价是最多三次主键查询、约 3 毫秒；换来的是少 120 行锁代码和两个故障面。删掉异步刷新换来的是最坏 1 毫秒级的请求阻塞，省掉一个线程池和一张在途表。</p>
+  </div>
+</div>
+
+<h3>9.1 准备好的三个追问</h3>
+
+<dl class="kv">
+  <dt>为什么详情不用版本号？</dt>
+  <dd>因为详情键的数量是有界的，可以精确删除；列表键数量无上界，没法枚举，才必须用版本号整体切换。用版本号处理有界集合，代价是要在共享缓存里维护等量的版本号键，并且每次读取多一次往返，收益却和精确删除一样。</dd>
+
+  <dt>失效通知丢了呢？</dt>
+  <dd>本地缓存有效期兜底，最多陈旧本地有效期那么久就会自行收敛。这正是不需要发件箱的原因——通知丢了没有正确性后果。反过来说，如果失效通知丢了会导致数据永久错误，那就必须上发件箱，那种场景我不会省。</dd>
+
+  <dt>三个实例同时回源怎么办？</dt>
+  <dd>接受它。回源是主键查询，三次并发查询在 3 毫秒量级。加锁要付出一个依赖和一套租约管理，而锁自身的故障（租约过期、等待超时、等待失败返回错误）比它防住的问题更严重。如果回源变成慢查询或外部调用，我会加回来，但用一条带租约的创建命令就够，不需要锁框架。</dd>
+</dl>
+
+<h2><span class="num">10</span>实施记录</h2>
+
+<div class="callout key">
+  <span class="label">已落地（2026-09-25）</span>
+  <p>编译通过，默认测试集 <b>141 个测试全部通过</b>，其中新增 6 个覆盖缓存核心语义的用例。</p>
+</div>
+
+<h3>10.1 变更清单</h3>
+
+<table>
+  <thead>
+    <tr><th>动作</th><th class="num">数量</th><th>内容</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>新增</td><td class="num">4</td><td>共享版本号、读路径、失效入口，以及删表迁移脚本</td></tr>
+    <tr><td>重写</td><td class="num">2</td><td>键定义、本地缓存配置</td></tr>
+    <tr><td>删除</td><td class="num">23</td><td>旧网关与协议对象、失效链路 6 个类、发件箱实体与数据访问层、消息配置、锁配置、三个旧测试</td></tr>
+    <tr><td>修改</td><td class="num">9</td><td>两个读点与六处写侧调用点、四个测试文件、依赖与配置</td></tr>
+  </tbody>
+</table>
+
+<p>缓存包从 <b>17 个类收敛到 4 个</b>；锁框架依赖已移除，项目内再无引用。</p>
+
+<h3>10.2 与设计的两处偏差</h3>
+
+<p><b>一、失效入口内部保留了事务提交回调。</b>设计文档把「失效必须在提交之后」写成一条调用方需要遵守的约束，实现里改为由失效入口自己判断：当前若存在活跃事务，两条命令就挂到提交回调上，否则立即执行。这样将来新增调用点时不会因为忘记这条规则而重新引入竞态。</p>
+
+<p><b>二、兼容用的观察者适配层保留外壳。</b>原实现对旧写入路径保留了一个只做转发的事件观察者。它已被写入侧四处调用，删除会牵动既有调用链，因此保留外壳、只更换内部实现，改动面更小。</p>
+
+<h3>10.3 测试暴露的一处语义确认</h3>
+
+<p>新增用例里最初写下的断言是「版本号抬升后详情应当重新加载」，运行后失败。原因正是本方案的核心设计：<b>详情共享键不含版本号，抬版本号只让本地缓存换键，共享缓存中那一份仍然命中</b>。断言已按真实语义修正并保留为固定用例，这条用例现在同时验证了「两个失效动作各管一层、缺一不可」。</p>
+
+<h3>10.4 尚未验证与观察项</h3>
+
+<ul>
+  <li><b>应用启动与真实依赖的联调尚未进行。</b>单元测试不加载 Spring 上下文，Bean 装配与 Flyway 迁移需要连上真实的共享缓存与数据库后确认。</li>
+  <li><b>观察期指标。</b>本地命中、共享命中、回源、负值四类结果已按 <code>teacup.cache.reads</code> 打点，建议观察一周，重点确认命中率未因本地缓存有效期变化而下滑。</li>
+  <li><b>旧键无需清理。</b>旧实现写入的 <code>tp:cache:v2:</code> 前缀键不会被新实现读取，会随自身有效期自动消失。</li>
+  <li><b>消息队列可能残留声明。</b>缓存的交换机与队列定义已随配置类删除，运行中的消息中间件里如需保持整洁，可手工清理对应队列。</li>
+</ul>
+
+<footer>
+  <p><b>参考</b>：现有实现与调用点已逐一核对（缓存包 17 个类、失效链路 6 个类、消息配置、建表脚本、6 处写侧调用点、3 处读侧引用）。本文档描述的目标方案已按第 10 节落地。</p>
+  <p><b>配套</b>：<code>docs/cache-architecture-redesign.md</code> 已在开头标注为「被本方案取代」，其一致性立场、数据分类与故障矩阵章节仍然适用。</p>
+</footer>
+
+</div>
+</body>
+</html>

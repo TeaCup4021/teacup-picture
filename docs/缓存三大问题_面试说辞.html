@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>缓存三大问题 · 面试说辞</title>
+<style>
+  :root {
+    --ink: #1c1c1e; --ink-2: #4a4a4f; --ink-3: #77777e;
+    --line: #e3e3e6; --line-2: #d0d0d5; --bg: #fafafa; --card: #fff;
+    --gray-bg: #F1EFE8;
+    --blue-bg: #E6F1FB; --blue-line: #85B7EB; --blue-ink: #0C447C;
+    --teal-bg: #E1F5EE; --teal-line: #5DCAA5; --teal-ink: #085041;
+    --amber-bg: #FAEEDA; --amber-line: #EF9F27; --amber-ink: #633806;
+    --red-bg: #FCEBEB; --red-line: #F09595; --red-ink: #791F1F;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 48px 24px 96px; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 15px; line-height: 1.75; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  header { margin-bottom: 40px; padding-bottom: 28px; border-bottom: 2px solid var(--ink); }
+  .eyebrow { font-size: 13px; color: var(--ink-3); letter-spacing: 0.06em; margin-bottom: 10px; }
+  h1 { font-size: 30px; font-weight: 600; margin: 0 0 16px; letter-spacing: -0.01em; line-height: 1.3; }
+  .lede { font-size: 16px; color: var(--ink-2); margin: 0; max-width: 780px; }
+  h2 { font-size: 21px; font-weight: 600; margin: 56px 0 18px; padding-top: 20px; border-top: 1px solid var(--line); letter-spacing: -0.01em; }
+  h2 .num { color: var(--ink-3); font-weight: 400; margin-right: 10px; }
+  h3 { font-size: 16px; font-weight: 600; margin: 30px 0 10px; }
+  h4 { font-size: 14px; font-weight: 600; margin: 22px 0 8px; color: var(--ink-2); }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  strong { font-weight: 600; }
+  em { font-style: normal; background: linear-gradient(transparent 62%, #FAEEDA 62%); padding: 0 1px; }
+  code { font-family: "SF Mono", Consolas, monospace; font-size: 13px; background: var(--gray-bg); padding: 2px 6px; border-radius: 4px; }
+
+  .say {
+    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--blue-line);
+    border-radius: 10px; padding: 18px 22px; margin: 18px 0 22px; font-size: 15.5px; line-height: 1.85;
+  }
+  .say .who { display: block; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; color: var(--blue-ink); margin-bottom: 10px; }
+  .say p:last-child { margin-bottom: 0; }
+  .say.hot { border-left-color: var(--teal-line); }
+  .say.hot .who { color: var(--teal-ink); }
+  .say.warn { border-left-color: var(--amber-line); background: #fffdf8; }
+  .say.warn .who { color: var(--amber-ink); }
+
+  table { width: 100%; border-collapse: collapse; margin: 18px 0 22px; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; font-size: 13px; color: var(--ink-2); background: var(--gray-bg); border-bottom: 1px solid var(--line-2); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr:hover { background: #fcfcfc; }
+
+  .chain { counter-reset: q; list-style: none; padding: 0; margin: 16px 0 24px; }
+  .chain > li {
+    counter-increment: q; position: relative; padding: 14px 18px 14px 52px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px;
+  }
+  .chain > li::before {
+    content: "Q" counter(q); position: absolute; left: 16px; top: 15px;
+    font-size: 12px; font-weight: 600; color: var(--ink-3); font-family: "SF Mono", Consolas, monospace;
+  }
+  .chain .q { font-weight: 600; margin-bottom: 6px; }
+  .chain .a { color: var(--ink-2); font-size: 14.5px; }
+  .chain .a::before { content: "答 "; color: var(--ink-3); font-size: 12px; font-weight: 600; }
+
+  .numcard { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 20px 0 26px; }
+  .numcard .c { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .numcard .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .numcard .k { font-size: 12.5px; color: var(--ink-3); margin-top: 4px; line-height: 1.5; }
+
+  .callout { border-radius: 10px; padding: 16px 20px; margin: 20px 0 24px; font-size: 14.5px; background: var(--blue-bg); border: 1px solid var(--blue-line); }
+  .callout.key { background: var(--teal-bg); border-color: var(--teal-line); }
+  .callout.risk { background: var(--red-bg); border-color: var(--red-line); }
+  .callout.warn { background: var(--amber-bg); border-color: var(--amber-line); }
+  .callout .label { display: block; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px; color: var(--blue-ink); }
+  .callout.key .label { color: var(--teal-ink); }
+  .callout.risk .label { color: var(--red-ink); }
+  .callout.warn .label { color: var(--amber-ink); }
+  .callout p:last-child, .callout ul:last-child { margin-bottom: 0; }
+
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 18px; font-size: 14px; margin: 16px 0 22px; }
+  .kv dt { color: var(--ink-2); font-weight: 500; }
+  .kv dd { margin: 0; }
+
+  footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-3); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">面试准备 · 茶杯图片工坊后端</div>
+  <h1>缓存三大问题 · 面试说辞</h1>
+  <p class="lede">
+    三档长度：30 秒电梯版、2 分钟标准版、逐题深挖版。每个问题都配追问链和「别这么说」的警告。
+    所有数字都来自当前真实实现，可以脱口而出。
+  </p>
+</header>
+
+<h2><span class="num">00</span>先记住这套回答的骨架</h2>
+
+<p>面试官问「三大缓存问题怎么解决」时，<b>不要立刻报三套方案</b>。先用一句话把框架立起来，再逐个展开。这个框架本身就是得分点：</p>
+
+<div class="say hot">
+  <span class="who">骨架</span>
+  <p>这三个问题的<b>触发条件、影响面和代价完全不同</b>，所以我在项目里对它们的投入强度是刻意不同的。</p>
+  <p>穿透和雪崩是「流量结构问题」，防线成本都很低，一个十几行、一个三行；<b>击穿是唯一一个我主动不做完整防护的</b>——因为算下来防护的代价比它防住的问题更贵。</p>
+  <p>而且我最后会主动说清哪两个地方<b>我没做</b>，以及什么条件下该补上。</p>
+</div>
+
+<div class="callout key">
+  <span class="label">这套说辞最值钱的地方</span>
+  <p>不是「我做了布隆过滤器 + 分布式锁 + 随机过期时间」那种模板答案，而是<b>每一道防线背后都有量化判据，以及「什么条件下该加回来」的触发条件</b>。面试官能从中看出你在做工程判断，而不是在背八股。</p>
+</div>
+
+<h2><span class="num">01</span>30 秒电梯版</h2>
+
+<p>如果面试官只是顺口一问，或者你感觉时间不多，就用这一版，一口气说完：</p>
+
+<div class="say">
+  <span class="who">直接背这段</span>
+  <p>穿透上我做了两道：入口只放行正整数编号，以及在两层缓存都存负值标记，共享层十五秒、本地层六十秒，这样同一个不存在的编号被反复请求时不会每次都落库。</p>
+  <p>击穿我<b>故意没有加分布式锁</b>。本地缓存的加载方法本身保证同一进程内同一个键只有一个线程真正去回源，跨实例最多三个实例各回源一次，也就是三次主键查询、三毫秒左右的数据库负载，不值得为它引入一个锁依赖。</p>
+  <p>雪崩主要靠两件事：写入共享缓存时有效期加零到百分之二十的随机抖动，以及<b>两层缓存相互独立</b>——版本号在进程内存里，共享缓存整体挂掉时本地缓存仍然能独立服务满六十秒。</p>
+  <p>另外我知道有两个地方没做：公开读接口没有限流，回源也没有限流，这两个在流量被扫描或被缓存故障放大时会成为瓶颈。</p>
+</div>
+
+<h2><span class="num">02</span>2 分钟标准版</h2>
+
+<p>面试官认真问的时候用这一版。结构是「框架 → 三个答案 → 缺口」，每一段都有数字。</p>
+
+<h3>第一步：先立框架</h3>
+
+<div class="say">
+  <span class="who">开场这样说</span>
+  <p>这三个问题的性质不一样。穿透和雪崩是流量结构问题，防线成本很低；击穿是并发问题，而并发防护在缓存这一层往往很贵，所以我先算了一下它值不值。</p>
+</div>
+
+<h3>第二步：穿透</h3>
+
+<div class="say">
+  <span class="who">穿透</span>
+  <p><b>两道关卡。</b>第一道在入口：编号必须是正整数，非数字直接返回参数错误；列表的每页条数限制在一到五十之间，防止用超大条数放大查询。</p>
+  <p><b>第二道是负值缓存，两层都存。</b>数据库判定「不存在或不可公开」时不作为异常往上抛，而是返回空值，由缓存层记住这个事实：共享缓存写一个负值标记、有效期十五秒；本地缓存存一个哨兵对象，跟着本地有效期走，六十秒。</p>
+  <p>效果是：一个被前端缺陷反复请求的已删除编号，<b>本地六十秒内零网络调用，共享缓存十五秒内只回源一次</b>。没有负值缓存的话，一千的请求量就是一千次数据库查询。</p>
+  <p>但我必须说清它的边界：<b>负值缓存只挡「同一个编号反复请求」，挡不住「每次换一个新编号」的扫描</b>。后者需要入口限流加布隆过滤器。我当前没做，判据是——图片编号是自增主键、规模在万级，重复穿透才是现实场景；等观察到回源请求里随机编号占比明显上升，再引入可重建的布隆过滤器。</p>
+</div>
+
+<h3>第三步：击穿</h3>
+
+<div class="say">
+  <span class="who">击穿</span>
+  <p><b>实例内我不用写代码。</b>本地缓存的加载方法本身就保证同一进程内、同一个键只有一个线程真正执行加载，其余并发线程挂在同一个结果上等。这是我选这个本地缓存库的一个隐性收益——自己维护一张「正在加载」的表，很容易写出条目泄漏。</p>
+  <p><b>跨实例我主动不设防。</b>项目是三个后端实例，最坏情况是一个热点键过期的瞬间，三个实例各回源一次。回源是两次主键查询，单次一毫秒量级，所以总计大约<b>三毫秒的数据库负载</b>。</p>
+  <p>为此加一个分布式锁的代价是：一个额外依赖、一百多行的锁代码和降级分支，而且锁本身会带来新故障——等待超时、抢不到锁返回错误、锁租约管理。我之前确实写过一版分布式锁，实测发现等待时间的参数配错了一个量级，而且抢不到锁会直接给用户返回服务不可用。<b>它引入的故障面比它防住的问题更严重。</b></p>
+  <p>所以我把它删了。<b>判据是回源成本</b>：回源是主键查询（毫秒级）就不要锁；回源变成慢查询或外部接口调用（五十毫秒以上）就必须加回来，那时用一条带租约的创建命令就够了，不需要引入完整的锁框架。</p>
+</div>
+
+<h3>第四步：雪崩</h3>
+
+<div class="say">
+  <span class="who">雪崩</span>
+  <p>这个问题要拆成两半看。</p>
+  <p><b>一半是「大量键同时过期」。</b>写入共享缓存时，物理有效期等于基础有效期加零到百分之二十的随机抖动：详情六十到七十二秒、列表三十到三十六秒、负值十五到十八秒。这里要强调一句——<b>抖动只是打散自然过期时刻，它不是失效手段</b>，不能拿它当一致性方案。</p>
+  <p><b>另一半是「共享缓存整体不可用」，这一半我认为更重要。</b>因为版本号是缓存在每个实例内存里的，读它只是一次内存读取，不产生任何网络调用，所以<b>共享缓存整体挂掉时，本地缓存仍然能独立服务满六十秒</b>。共享缓存读失败按未命中处理，直接回源，既不阻塞也不返回陈旧数据。</p>
+  <p>量级上，本地缓存容量两万条、有效期六十秒。假设五百张热门图片常驻在里面，共享缓存全挂时这五百张零网络调用，只有冷数据会回源。</p>
+  <p><b>这里的缺口是没有回源限流。</b>共享缓存长时间不可用叠加大量冷数据请求，会全部并发压到数据库，最先崩的是连接池。判据很明确：数据库连接池小于三十的时候，给回源加一个信号量限流。</p>
+</div>
+
+<h3>第五步：收尾给判断</h3>
+
+<div class="say hot">
+  <span class="who">收尾这样说</span>
+  <p>整体上，这三项里只有击穿是「删代码反而更稳」的，另外两项的防线都是十行代码量级。</p>
+  <p>真正需要警惕的是两个缺口——公开读接口没有限流、回源没有限流。它们现在不发作是因为流量小，一旦被扫描或者被缓存故障放大，最先出问题的一定是数据库连接池。</p>
+</div>
+
+<h2><span class="num">03</span>逐题深挖：追问链</h2>
+
+<p>下面是面试官可能接着问的，以及你应该怎么答。这些问答的目的是区分「背过了」和「想明白了」。</p>
+
+<h3>穿透的追问链</h3>
+
+<ol class="chain">
+  <li>
+    <div class="q">为什么不用布隆过滤器？</div>
+    <div class="a">因为它的成本和收益在当前的规模下不匹配。布隆过滤器要在内存里维护一份全量编号的位图，还得处理数据增删时的重建和误判兜底。而它挡的只是「不存在的编号」，对「已删除但编号存在」的情况无效。判据是：当随机编号扫描成为主要成本时才引入，而且要选可重建的方案。</div>
+  </li>
+  <li>
+    <div class="q">负值缓存的有效期为什么是十五秒，不是跟详情一样六十秒？</div>
+    <div class="a">因为负值比正常值更容易变错。一个编号从「不存在」变成「存在」只有几条路径，比如审核通过、撤回后重新申请通过，这些都会触发失效动作把负值清掉。十五秒是失效动作失败时的兜底上界。正常值六十秒是因为它的变更同样有失效动作兜底，更长一点可以换更高的命中率。</div>
+  </li>
+  <li>
+    <div class="q">空列表和「不存在」怎么区分？</div>
+    <div class="a">两者在缓存里是不同形态。空列表是合法值，正常序列化后是一个对象；不存在是一个固定的负值标记。读取时先判断标记，再决定是反序列化还是直接返回不存在。这也是为什么负值标记不能直接用空字符串——空字符串和「值是空」无法区分。</div>
+  </li>
+  <li>
+    <div class="q">如果攻击者用大量不同编号扫描怎么办？</div>
+    <div class="a">负值缓存对它无效，因为每个编号都是第一次请求，必然回源一次。这时候要靠入口限流，按来源维度限制请求速率，同时监控回源请求里随机编号的占比。这也是我刚才说的一旦观察到这个信号就要补限流的原因。</div>
+  </li>
+  <li>
+    <div class="q">负值缓存会不会导致「图片刚审核通过但用户看不到」？</div>
+    <div class="a">会有一个很短的窗口，但窗口由失效率决定而不是由负值有效期决定。审核通过时会在事务提交后执行两条命令：删掉这张图的详情键、把共享版本号加一。本地缓存因为键里带版本号会整体换号，共享缓存那一份被精确删除。<b>这两个动作各管一层，缺一不可</b>——只删共享键的话，本地缓存里的负值还在；只抬版本号的话，共享缓存里那一份负值还在。</div>
+  </li>
+</ol>
+
+<h3>击穿的追问链</h3>
+
+<ol class="chain">
+  <li>
+    <div class="q">三个实例同时回源，数据库扛得住吗？</div>
+    <div class="a">算一下就知道：回源是两次主键等值查询，单次一毫秒量级，三个实例并发也就是三毫秒的负载，而且只在缓存刚过期的瞬间发生，稳态不存在。相比之下五百并发直接压到数据库才是问题，而那种情况已经被缓存挡住了。</div>
+  </li>
+  <li>
+    <div class="q">本地缓存的「同键只有一个线程加载」是怎么实现的？</div>
+    <div class="a">用本地缓存库自带的「带加载函数的读取」接口。它的语义是：同一个键如果已有加载在执行，其它调用线程会等待并复用同一个结果，而不是各自再执行一遍加载函数。不需要自己维护在途表。</div>
+  </li>
+  <li>
+    <div class="q">不加锁的话，热点键过期瞬间本地缓存能挡住吗？</div>
+    <div class="a">热点键的实际表现比理论好，因为本地缓存和共享缓存是两层独立有效期。热点数据在本地缓存里也有一份，本地有效期六十秒、共享六十秒，两者不会精确同时到点，所以真正打到数据库的并发比理论值更低。</div>
+  </li>
+  <li>
+    <div class="q">什么情况下你会把分布式锁加回来？</div>
+    <div class="a">回源成本上升到五十毫秒以上时——比如回源要做没走索引的聚合、要调外部接口、或者要做昂贵的计算。那时三个实例并发回源就是上百毫秒乘以三的负载，值得协调。加回来也不用锁框架，用一条「不存在才创建、带租约」的命令就够，大约二十行。</div>
+  </li>
+  <li>
+    <div class="q">你说的「之前那版分布式锁」有什么问题？</div>
+    <div class="a">两个具体缺陷。一是等待对方加载完成的超时参数配错了一个量级，设计上写的是百毫秒级，代码里用的是锁租约的五秒。二是抢不到锁的请求会直接返回服务不可用，等于把一个性能问题升级成了可用性问题。这两处都是「复杂方案自己都执行不一致」的典型。</div>
+  </li>
+</ol>
+
+<h3>雪崩的追问链</h3>
+
+<ol class="chain">
+  <li>
+    <div class="q">抖动范围为什么取百分之二十？</div>
+    <div class="a">够把同一批写入的键的过期时刻打散开，又不会让有效期明显偏离预期。但要说清一点：<b>抖动解决的是「自然过期时刻集中」，它不解决「缓存服务整体不可用」和「热点键击穿」</b>，后两者要分别靠两层独立和实例内单飞。</div>
+  </li>
+  <li>
+    <div class="q">共享缓存整个挂了，你的系统会怎样？</div>
+    <div class="a">分三段看。已经在本地缓存里的数据继续正常服务，因为版本号在内存里，完全不依赖共享缓存。本地缓存没命中的请求会直接回源数据库，读失败不做阻塞等待、也不返回陈旧值。第三段是风险点：如果共享缓存长时间不可用且有大量冷数据请求，回源会打到数据库，而这一层我没有限流。</div>
+  </li>
+  <li>
+    <div class="q">为什么不做缓存预热？</div>
+    <div class="a">当前规模下收益不明确。预热要在应用启动时或者发布后主动加载一批数据，如果加载策略写不好，反而会在启动瞬间把数据库打一波尖峰。判据是：如果观察到发布后回源尖峰影响到数据库的响应时间，再做预热，而且必须限速分批。</div>
+  </li>
+  <li>
+    <div class="q">Redis 的淘汰策略你考虑过吗？</div>
+    <div class="a">考虑过，缓存和会话、限流、长租约这些数据不在同一个可淘汰空间里，否则缓存淘汰会把业务状态挤掉。生产环境的缓存实例应该独立配置内存上限、淘汰策略和慢查询告警。</div>
+  </li>
+  <li>
+    <div class="q">那两个缺口你打算怎么补？</div>
+    <div class="a">回源限流用一个信号量把并发回源数量卡住，超出就快速失败或者返回降级响应，避免把连接池占满。入口限流按来源维度做。两个都有明确触发条件：连接池小于三十时补回源限流；观察到回源请求里随机编号占比上升时补入口限流。</div>
+  </li>
+</ol>
+
+<h2><span class="num">04</span>三个反常识点（最能让面试官记住你）</h2>
+
+<div class="say hot">
+  <span class="who">一 · 击穿是唯一「删代码更稳」的一项</span>
+  <p>大多数人讲击穿都在讲「我加了锁」。你可以反过来讲：<b>我加了之后又删了，因为量化下来它不划算，而且它引入的故障比它防住的问题更严重。</b>然后给出判据——回源成本从毫秒级涨到五十毫秒以上时再加回来。</p>
+</div>
+
+<div class="say hot">
+  <span class="who">二 · 负值缓存有明确的边界，不是万能的</span>
+  <p>讲完负值缓存之后主动补一句：<b>它只能挡「同一个编号反复请求」，挡不住每次换新编号的扫描。</b>主动说出方案的边界，比等面试官来挑破强得多。</p>
+</div>
+
+<div class="say hot">
+  <span class="who">三 · 抖动的定位是「打散自然过期」，不是失效手段</span>
+  <p>这句话能一次性区分开「背八股」和「懂机制」。很多人的答案是「用随机过期时间防止雪崩」，但说不清它防不住什么。<b>它防不住缓存服务整体不可用，也防不住单个热点键的击穿。</b></p>
+</div>
+
+<h2><span class="num">05</span>别这么说（会当场翻车）</h2>
+
+<div class="callout risk">
+  <span class="label">以下说法与你的实现不符，说了会被追问到崩</span>
+  <ul>
+    <li><b>「我用布隆过滤器解决穿透。」</b>项目里没有布隆过滤器。说了之后面试官问「位图多大、误判率多少、数据删除时怎么重建」，你就下不来台了。正确说法是「我评估过，当前规模不需要，判据是什么」。</li>
+    <li><b>「我用分布式锁解决击穿。」</b>已经删掉了。而且如果面试官深挖「锁租约、等待超时、锁释放校验」，你讲的是已经不存在的实现。</li>
+    <li><b>「缓存和数据库要保证强一致。」</b>这是公开读模型，立场是有界最终一致。说强一致等于给自己挖坑。</li>
+    <li><b>「随机有效期能防止雪崩。」</b>太笼统，会被追问「那缓存整体挂了怎么办」。要拆成「自然过期集中」和「服务不可用」两半说。</li>
+    <li><b>只讲方案不讲判据。</b>「我加了随机 TTL」不是完整回答，「我加了随机 TTL，因为它只能打散自然过期，服务不可用要靠另一层，判据是……」才是。</li>
+  </ul>
+</div>
+
+<h2><span class="num">06</span>数字清单（面试前五分钟过一遍）</h2>
+
+<div class="numcard">
+  <div class="c"><div class="v">3</div><div class="k">后端实例数，决定跨实例回源上限</div></div>
+  <div class="c"><div class="v">60 秒</div><div class="k">本地缓存有效期，也是共享缓存详情有效期</div></div>
+  <div class="c"><div class="v">30 秒</div><div class="k">共享缓存列表有效期</div></div>
+  <div class="c"><div class="v">15 秒</div><div class="k">负值标记有效期</div></div>
+  <div class="c"><div class="v">0～20%</div><div class="k">有效期随机抖动的范围</div></div>
+  <div class="c"><div class="v">2 万条</div><div class="k">本地缓存容量上限</div></div>
+  <div class="c"><div class="v">约 1 毫秒</div><div class="k">单次回源（两次主键查询）</div></div>
+  <div class="c"><div class="v">最多 3 次</div><div class="k">热点键过期瞬间的跨实例回源次数</div></div>
+  <div class="c"><div class="v">500 毫秒</div><div class="k">版本号轮询间隔，即跨实例失效收敛上界</div></div>
+  <div class="c"><div class="v">10 到 50</div><div class="k">列表每页条数的允许范围</div></div>
+</div>
+
+<div class="callout warn">
+  <span class="label">如果面试官问「这些数字是怎么定的」</span>
+  <p>不要答「经验值」。答<b>「初始值，上线后按命中率和回源成本调参」</b>，并给出一个具体例子：本地缓存有效期从五分钟压到六十秒是这次重构的取舍结果，理由是它只是兜底、真正的失效靠版本号切换，所以可以短；如果观察到命中率因此下滑，就把轮询间隔从五百毫秒降到一百毫秒来补偿。</p>
+</div>
+
+<h2><span class="num">07</span>收尾反问（把话题引到你熟的地方）</h2>
+
+<p>面试官问完之后，你可以用一个反问把话题往下带，主动权就回到你手里了：</p>
+
+<div class="say">
+  <span class="who">可以这样反问</span>
+  <p>我比较想听听您这边的判断——<b>在回源成本不高的情况下，你们会为了「理论上更少的回源次数」引入分布式锁吗？</b>我这次删掉锁的核心理由是回源只是一次主键查询，但我也担心这是不是只看单点成本、没有看长尾。</p>
+</div>
+
+<p>这个反问的好处是：它把讨论从「你做了什么」转到「你怎么权衡」，而且承认了自己的判断可能有盲区——这比一口咬定「我这样做就是对的」更可信。</p>
+
+<footer>
+  <p><b>配套</b>：数字与机制均来自 <code>docs/缓存方案简化设计.html</code> 与当前实现，两者一致。</p>
+  <p><b>提醒</b>：这套说辞里的每一个数字你都要能自己复述，面试现场临时回忆会卡壳。</p>
+</footer>
+
+</div>
+</body>
+</html>

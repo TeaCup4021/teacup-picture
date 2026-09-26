@@ -2,6 +2,7 @@ package com.teacup.teacuppicturebackend.api.v1;
 
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.teacup.teacuppicturebackend.api.v1.model.M6Dtos;
+import com.teacup.teacuppicturebackend.cache.PublicPictureInvalidation;
 import com.teacup.teacuppicturebackend.mapper.*;
 import com.teacup.teacuppicturebackend.model.entity.*;
 import com.teacup.teacuppicturebackend.model.enums.SpaceTypeEnum;
@@ -76,6 +77,22 @@ class M6ServiceTest {
         assertEquals(64, saved.getSecretHash().length());
         assertFalse(result.sharePath().contains(saved.getSecretHash()));
         assertNotEquals("review-123", saved.getPasswordHash());
+    }
+
+    @Test
+    void ownerWithdrawalRecordsPublicCacheInvalidation() {
+        PublicPictureInvalidation invalidations = mock(PublicPictureInvalidation.class);
+        M6Service cachedService = new M6Service(pictures, shares, comments, mentions, notifications, users, spaces,
+                members, publishRequests, userService, access, currentVersions, storage, redis,
+                new com.fasterxml.jackson.databind.ObjectMapper(), invalidations);
+        picture.setVisibility("public");
+        picture.setPublishStatus("approved");
+        when(userService.isAdmin(owner)).thenReturn(false);
+        when(publishRequests.selectOne(any())).thenReturn(null);
+
+        cachedService.withdrawPublication(owner, 100L);
+
+        verify(invalidations).pictureChanged(100L);
     }
 
     @Test

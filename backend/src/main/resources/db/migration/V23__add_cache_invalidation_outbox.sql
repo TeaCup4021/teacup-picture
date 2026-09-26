@@ -1,0 +1,20 @@
+CREATE TABLE `cache_invalidation_outbox` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `eventId` CHAR(36) NOT NULL,
+    `pictureId` BIGINT NOT NULL,
+    `catalogInvalidation` TINYINT(1) NOT NULL,
+    `status` VARCHAR(20) NOT NULL,
+    `attemptCount` INT NOT NULL DEFAULT 0,
+    `nextAttemptAt` DATETIME NOT NULL,
+    `lockOwner` VARCHAR(128) NULL,
+    `lockUntil` DATETIME NULL,
+    `publishedAt` DATETIME NULL,
+    `lastError` VARCHAR(500) NULL,
+    `createTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updateTime` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_cache_invalidation_outbox_event` (`eventId`),
+    KEY `idx_cache_invalidation_outbox_due` (`status`, `nextAttemptAt`, `lockUntil`, `id`),
+    KEY `idx_cache_invalidation_outbox_published` (`status`, `publishedAt`, `id`),
+    KEY `idx_cache_invalidation_outbox_picture` (`pictureId`, `id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;

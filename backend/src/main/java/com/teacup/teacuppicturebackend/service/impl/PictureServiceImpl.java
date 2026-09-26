@@ -103,13 +103,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 //            if (!loginUser.getId().equals(space.getUserId())) {
 //                throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "没有空间权限");
 //            }
-            // 校验额度
-            if (space.getTotalCount() >= space.getMaxCount()) {
-                throw new BusinessException(ErrorCode.OPERATION_ERROR, "空间条数不足");
-            }
-            if (space.getTotalSize() >= space.getMaxSize()) {
-                throw new BusinessException(ErrorCode.OPERATION_ERROR, "空间大小不足");
-            }
+            // 额度校验不在这里做：此刻还不知道本次要写入多大，而且这里原来的条件漏掉了本次大小，
+            // 等价于「只要还剩 1 字节就允许写入整张图」。真正的校验与扣减在写入事务内一次完成。
         }
 
 
@@ -117,13 +112,15 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         if (pictureUploadRequest != null) {
             pictureId = pictureUploadRequest.getId();
         }
+        // 更新场景要用旧图大小结算额度差额，因此声明在外层供写入事务使用
+        Picture oldPicture = null;
         //如果是更新判断图片是否存在
         if (pictureId != null) {
 //            boolean exists = this.lambdaQuery()
 //                    .eq(Picture::getId, pictureId)
 //                    .exists();
 //            ThrowUtils.throwIf(!exists, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
-            Picture oldPicture = this.getById(pictureId);
+            oldPicture = this.getById(pictureId);
             ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
 
             if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
@@ -144,12 +141,6 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                     throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "没有空间权限");
                 }
 
-                if (space.getTotalCount() >= space.getMaxCount()) {
-                    throw new BusinessException(ErrorCode.OPERATION_ERROR, "空间条数不足");
-                }
-                if (space.getTotalSize() >= space.getMaxSize()) {
-                    throw new BusinessException(ErrorCode.OPERATION_ERROR, "空间大小不足");
-                }
                 if (ObjUtil.notEqual(spaceId, oldPicture.getSpaceId())) {
                     throw new BusinessException(ErrorCode.PARAMS_ERROR, "空间 id 不一致");
                 }
@@ -198,17 +189,21 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
 
         Long finalSpaceId = spaceId;
+        boolean creating = pictureId == null;
+        long previousSize = oldPicture == null || oldPicture.getPicSize() == null ? 0L : oldPicture.getPicSize();
+        long newSize = picture.getPicSize() == null ? 0L : picture.getPicSize();
+        long sizeDelta = newSize - previousSize;
         try {
             transactionTemplate.execute(status -> {
                 boolean result = this.saveOrUpdate(picture);
                 ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
                 if (finalSpaceId != null) {
-                    boolean update = spaceService.lambdaUpdate()
-                            .eq(Space::getId, finalSpaceId)
-                            .setSql("totalSize = totalSize + " + picture.getPicSize())
-                            .setSql("totalCount = totalCount + 1")
-                            .update();
-                    ThrowUtils.throwIf(!update, ErrorCode.OPERATION_ERROR, "额度更新失败");
+                    // 新增：按实际大小占用额度并计一件。
+                    // 更新：只结算大小差额，数量不变。
+                    // 此前两条路径都执行「totalSize + 本次大小」与「totalCount + 1」，
+                    // 于是更新图片时旧图大小会永久留在已用额度里，数量也会被重复累加。
+                    boolean consumed = spaceService.tryConsume(finalSpaceId, sizeDelta, creating ? 1 : 0);
+                    ThrowUtils.throwIf(!consumed, ErrorCode.OPERATION_ERROR, "空间容量不足");
                 }
                 return picture;
             });
@@ -381,6 +376,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         updatePicture.setReviewTime(new Date());
         boolean result = this.updateById(updatePicture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        ClearEvent reviewEvent = ClearEvent.of("UPDATE", "PICTURE", id);
+        if (pictureCacheClearObserver.supports(reviewEvent)) {
+            pictureCacheClearObserver.handleClearEvent(reviewEvent);
+        }
     }
 
     //补充审核参数
@@ -418,12 +417,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
             Long spaceId = oldPicture.getSpaceId();
             if (spaceId != null) {
-                boolean update = spaceService.lambdaUpdate()
-                        .eq(Space::getId, spaceId)
-                        .setSql("totalSize = totalSize - " + oldPicture.getPicSize())
-                        .setSql("totalCount = totalCount - 1")
-                        .update();
-                ThrowUtils.throwIf(!update, ErrorCode.OPERATION_ERROR, "额度更新失败");
+                // 释放不需要检查上限，也只保底不为负：额度算错不该阻止图片被删除
+                spaceService.releaseUsage(spaceId, oldPicture.getPicSize() == null ? 0L : oldPicture.getPicSize(), 1);
             }
             pictureStorageDeleteService.enqueue(oldPicture);
             return true;

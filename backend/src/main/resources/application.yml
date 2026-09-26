@@ -51,23 +51,45 @@ logging:
     # MyBatis SQL 默认静默，避免逐条刷屏；排查 SQL 时把该包临时改为 debug 即可恢复
     com.teacup.teacuppicturebackend.mapper: warn
 
+management:
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
 
 teacup:
+  cache:
+    local:
+      # 本地缓存有效期只作兜底：正常情况下版本号切换已让旧键不再被访问
+      max-size: ${CACHE_LOCAL_MAX_SIZE:20000}
+      ttl-seconds: ${CACHE_LOCAL_TTL_SECONDS:60}
+    shared:
+      detail-ttl-seconds: ${CACHE_SHARED_DETAIL_TTL_SECONDS:60}
+      list-ttl-seconds: ${CACHE_SHARED_LIST_TTL_SECONDS:30}
+      negative-ttl-seconds: ${CACHE_SHARED_NEGATIVE_TTL_SECONDS:15}
+    generation:
+      # 各实例独立轮询共享版本号的间隔，即跨实例失效的收敛上界
+      sync-millis: ${CACHE_GENERATION_SYNC_MILLIS:500}
   ai:
     quota:
       generate-daily: ${AI_GENERATE_DAILY_QUOTA:100}
       outpaint-daily: ${AI_OUTPAINT_DAILY_QUOTA:100}
       zone: ${AI_QUOTA_ZONE:Asia/Shanghai}
-      # 配额对账兜底：修复事件路径没走完留下的预占悬挂。min-age 必须大于任务最长合法生命周期。
+      # 配额对账兜底：修复事件路径没走完留下的预占悬挂。
+      # 僵尸年龄＝任务最长合法生命周期：4 次执行 × 读超时 120s ＋ 退避 5/30/120s ≈ 635s，向上取整 11 分钟。
+      # 它同时充当候选筛选门槛与僵尸判定门槛，只能是一个数——拆成两个必然出现「改一个忘一个」，
+      # 历史上就曾拆成 360 与 120，实际生效的是 360，用户为悬挂预占最长白等 6 小时。
       reconcile-millis: ${AI_QUOTA_RECONCILE_MILLIS:600000}
       reconcile-initial-delay-millis: ${AI_QUOTA_RECONCILE_INITIAL_DELAY_MILLIS:60000}
-      reconcile-min-age-minutes: ${AI_QUOTA_RECONCILE_MIN_AGE_MINUTES:360}
-      reconcile-zombie-age-minutes: ${AI_QUOTA_RECONCILE_ZOMBIE_AGE_MINUTES:120}
+      reconcile-zombie-age-minutes: ${AI_QUOTA_RECONCILE_ZOMBIE_AGE_MINUTES:11}
       reconcile-batch-size: ${AI_QUOTA_RECONCILE_BATCH_SIZE:200}
     running-timeout-minutes: ${AI_RUNNING_TIMEOUT_MINUTES:15}
     worker:
       concurrency: ${AI_WORKER_CONCURRENCY:4}
       global-concurrency: ${AI_PROVIDER_GLOBAL_CONCURRENCY:12}
+      # 上游配额上限为 70 次/分钟，本值必须低于该上限。
+      # 差额用于吸收：① 空闲后转繁忙时一次性触发的突发（最多等于 burst-capacity）；
+      # ② 我们与上游在时钟和统计窗口上的偏差。当前 60 留出 10 次余量。
       requests-per-minute: ${AI_PROVIDER_REQUESTS_PER_MINUTE:60}
       burst-capacity: ${AI_PROVIDER_BURST_CAPACITY:4}
       lease-seconds: ${AI_WORKER_LEASE_SECONDS:300}

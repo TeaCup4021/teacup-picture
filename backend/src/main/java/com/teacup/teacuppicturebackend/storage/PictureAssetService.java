@@ -47,6 +47,11 @@ public class PictureAssetService {
         return baseUrl + "/public/pictures/" + pictureId + "/content?variant=" + normalizedVariant(variant);
     }
 
+    public String publicUrl(long pictureId, Long versionId, String variant) {
+        String url = publicUrl(pictureId, variant);
+        return versionId == null ? url : url + "&version=" + versionId;
+    }
+
     public PictureStorage.StoredObject loadPrivate(User user, long pictureId, String variant) {
         Picture picture = requirePicture(pictureId);
         if (spaceAccess != null) {
@@ -59,8 +64,15 @@ public class PictureAssetService {
     }
 
     public PictureStorage.StoredObject loadPublic(long pictureId, String variant) {
+        return loadPublic(pictureId, null, variant);
+    }
+
+    public PictureStorage.StoredObject loadPublic(long pictureId, Long versionId, String variant) {
         Picture picture = requirePicture(pictureId);
         if (!"public".equals(picture.getVisibility()) || !"approved".equals(picture.getPublishStatus())) {
+            throw V1Exception.notFound();
+        }
+        if (versionId != null && !Objects.equals(versionId, picture.getCurrentVersionId())) {
             throw V1Exception.notFound();
         }
         return load(picture, variant);

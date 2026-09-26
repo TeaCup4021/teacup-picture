@@ -8,6 +8,7 @@ import com.teacup.teacuppicturebackend.mapper.PictureVersionMapper;
 import com.teacup.teacuppicturebackend.mapper.PublishRequestMapper;
 import com.teacup.teacuppicturebackend.mapper.SpaceMapper;
 import com.teacup.teacuppicturebackend.mapper.UserMapper;
+import com.teacup.teacuppicturebackend.cache.PublicPictureInvalidation;
 import com.teacup.teacuppicturebackend.model.entity.Picture;
 import com.teacup.teacuppicturebackend.model.entity.PictureDraft;
 import com.teacup.teacuppicturebackend.model.entity.PictureVersion;
@@ -52,6 +53,7 @@ class M3ServiceTest {
     private final UserService userService = mock(UserService.class);
     private final PictureStorage storage = mock(PictureStorage.class);
     private final PictureAssetService assets = mock(PictureAssetService.class);
+    private final PublicPictureInvalidation pictureInvalidation = mock(PublicPictureInvalidation.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
     private M3Service service;
     private User user;
@@ -61,7 +63,7 @@ class M3ServiceTest {
     @BeforeEach
     void setUp() {
         service = new M3Service(pictures, drafts, versions, publishRequests, spaces, users,
-                userService, storage, assets, objectMapper);
+                userService, storage, assets, objectMapper, null, pictureInvalidation);
         user = new User();
         user.setId(11L);
         user.setUserName("编辑者");
@@ -89,6 +91,8 @@ class M3ServiceTest {
         when(pictures.selectById(100L)).thenReturn(picture);
         when(pictures.lockPictureForUpdate(100L)).thenReturn(100L);
         when(spaces.selectById(200L)).thenReturn(space);
+        // 额度校验与扣减已合并到 tryConsume，返回 false 即表示额度不足
+        when(spaces.tryConsume(anyLong(), anyLong(), anyLong())).thenReturn(true);
         when(users.selectById(11L)).thenReturn(user);
         when(assets.versionContentUrl(eq(100L), anyLong(), any())).thenAnswer(invocation ->
                 "http://localhost/api/v1/pictures/100/versions/" + invocation.getArgument(1) + "/content?variant=" + invocation.getArgument(2));
@@ -263,8 +267,10 @@ class M3ServiceTest {
         verify(versions, times(2)).insert(any(PictureVersion.class));
         verify(pictures).updateById(picture);
         verify(publishRequests).update(isNull(), any(Wrapper.class));
+        verify(pictureInvalidation).pictureChanged(100L);
         verify(drafts).deleteById(9L);
-        verify(spaces).update(isNull(), any(Wrapper.class));
+        // 额度结算已改为条件更新，数量维度不参与（替换图片不改变件数）
+        verify(spaces).tryConsume(200L, 500L, 0L);
     }
 
     @Test
@@ -295,7 +301,8 @@ class M3ServiceTest {
         assertEquals("宣传图", copy.getCategory());
         assertEquals("[\"茶杯\",\"春季\"]", copy.getTags());
         assertEquals("spaces/200/pictures/original.jpg", picture.getObjectKey());
-        verify(spaces).update(isNull(), any(Wrapper.class));
+        // 另存图片按实际大小占用额度并新增一件，校验与扣减已合并到 tryConsume
+        verify(spaces).tryConsume(eq(200L), anyLong(), eq(1L));
     }
 
     @Test

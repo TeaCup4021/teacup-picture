@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockFilterConfig;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Instant;
@@ -112,10 +113,26 @@ class M1ControllerTest {
 
     @Test
     void publicContentReturnsNotFoundWhenPictureIsNotPublic() throws Exception {
-        when(assets.loadPublic(31L, "original")).thenThrow(V1Exception.notFound());
+        when(assets.loadPublic(31L, null, "original")).thenThrow(V1Exception.notFound());
         mockMvc.perform(get("/api/v1/public/pictures/31/content"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(40400));
+    }
+
+    @Test
+    void publicGalleryHonorsWeakEtag() throws Exception {
+        M1Dtos.PublicPictureCursorPage page = new M1Dtos.PublicPictureCursorPage(java.util.List.of(), null, false);
+        when(service.publicPictures(null, 20)).thenReturn(page);
+
+        MvcResult first = mockMvc.perform(get("/api/v1/public/pictures"))
+                .andExpect(status().isOk())
+                .andExpect(header().exists("ETag"))
+                .andReturn();
+        String etag = first.getResponse().getHeader("ETag");
+
+        mockMvc.perform(get("/api/v1/public/pictures").header("If-None-Match", etag))
+                .andExpect(status().isNotModified())
+                .andExpect(header().string("ETag", etag));
     }
 
     @Test

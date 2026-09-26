@@ -3,18 +3,17 @@ package com.teacup.teacuppicturebackend.controller;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
-import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.github.benmanes.caffeine.cache.Cache;
 import com.teacup.teacuppicturebackend.annotation.AuthCheck;
 import com.teacup.teacuppicturebackend.auth.StpInterfaceImpl;
 import com.teacup.teacuppicturebackend.auth.StpKit;
 import com.teacup.teacuppicturebackend.auth.annotation.SaSpaceCheckPermission;
 import com.teacup.teacuppicturebackend.auth.model.SpaceUserAuthManager;
 import com.teacup.teacuppicturebackend.auth.model.SpaceUserPermissionConstant;
+import com.teacup.teacuppicturebackend.cache.PublicPictureInvalidation;
 import com.teacup.teacuppicturebackend.common.BaseResponse;
 import com.teacup.teacuppicturebackend.common.DeleteRequest;
 import com.teacup.teacuppicturebackend.common.ResultUtils;
@@ -35,10 +34,7 @@ import com.teacup.teacuppicturebackend.service.SpaceService;
 import com.teacup.teacuppicturebackend.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.DigestUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import com.teacup.teacuppicturebackend.model.entity.User;
@@ -51,7 +47,6 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -71,12 +66,9 @@ public class PictureController {
     private SpaceService spaceService;
 
     @Resource
-    private StringRedisTemplate stringRedisTemplate;
-
-    @Resource(name = "pictureLocalCache")
-    private Cache<String, String> localCache;
-    @Resource
     private SpaceUserAuthManager spaceUserAuthManager;
+    @Resource
+    private PublicPictureInvalidation pictureInvalidation;
 
 
     /**
@@ -147,24 +139,9 @@ public class PictureController {
     @GetMapping("/get/vo")
     public BaseResponse<PictureVO> getPictureVOById(long id, HttpServletRequest request) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
-        // 先查缓存
-        String cacheKey = "teacuppicture:picture:" + id;
-        String cached = stringRedisTemplate.opsForValue().get(cacheKey);
-        Picture picture;
-        if ("null".equals(cached)) {
-            // 命中空值缓存，直接返回 404，防止缓存穿透
-            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
-        } else if (cached != null) {
-            picture = JSONUtil.toBean(cached, Picture.class);
-        } else {
-            picture = pictureService.getById(id);
-            if (picture == null) {
-                // 缓存空值（短TTL），防止不存在的ID反复穿透到DB
-                stringRedisTemplate.opsForValue().set(cacheKey, "null", 2, TimeUnit.MINUTES);
-                throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
-            }
-            stringRedisTemplate.opsForValue().set(cacheKey, JSONUtil.toJsonStr(picture), 5, TimeUnit.MINUTES);
-        }
+        // This legacy endpoint returns a permission-aware view. Do not cache the pre-authorization entity.
+        Picture picture = pictureService.getById(id);
+        ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR);
         //空间权限校验
         Long spaceId = picture.getSpaceId();
         Space space = null;
@@ -216,6 +193,7 @@ public class PictureController {
 
         boolean result = pictureService.updateById(picture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        pictureInvalidation.pictureChanged(id);
         return ResultUtils.success(true);
     }
 
@@ -282,7 +260,7 @@ public class PictureController {
     }
 
     /**
-     * 分页获取图片列表（封装类，有缓存）
+     * 历史兼容路由。权限相关的分页结果不进入共享缓存。
      * @param pictureQueryRequest
      * @param request
      * @return
@@ -298,60 +276,9 @@ public class PictureController {
 
         pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
 
-        //生成缓存的键值
-        //转换为标准的数据交换格式：JSON字符串
-        String queryCondition = JSONUtil.toJsonStr(pictureQueryRequest);
-        //MD5算法生成hashkey
-        String hashKey = DigestUtils.md5DigestAsHex(queryCondition.getBytes());
-        String cacheKey = "teacuppicture:listPictureVOByPage:" + hashKey;
-
-        //获取Redis中操作字符串类型数据的工具类实例
-        ValueOperations<String, String> valueOps = stringRedisTemplate.opsForValue();
-        //先查本地缓存
-        String cachedValue = localCache.getIfPresent(cacheKey);
-        if (cachedValue != null) {
-
-            Page<PictureVO> cachedPage = JSONUtil.toBean(cachedValue, Page.class);
-            return ResultUtils.success(cachedPage);
-        }
-
-        //查询分布式redis缓存
-        cachedValue = valueOps.get(cacheKey);
-        if (cachedValue != null) {
-
-            localCache.put(cacheKey, cachedValue);
-            Page<PictureVO> cachedPage = JSONUtil.toBean(cachedValue, Page.class);
-            return ResultUtils.success(cachedPage);
-        }
-
-        // 分布式锁防击穿：热点key过期时只允许一个线程查DB
-        String lockKey = cacheKey + ":lock";
-        Boolean locked = stringRedisTemplate.opsForValue().setIfAbsent(lockKey, "1", 10, TimeUnit.SECONDS);
-        Page<PictureVO> pictureVOPage = null;
-        try {
-            if (!Boolean.TRUE.equals(locked)) {
-                // 未拿到锁，等待持锁线程写入缓存后重试
-                try { Thread.sleep(100); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-                cachedValue = valueOps.get(cacheKey);
-                if (cachedValue != null) {
-                    localCache.put(cacheKey, cachedValue);
-                    return ResultUtils.success(JSONUtil.toBean(cachedValue, Page.class));
-                }
-            }
-            // 持锁线程查DB（或重试后缓存仍为空时的兜底）
-            Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
-                    pictureService.getQueryWrapper(pictureQueryRequest));
-            pictureVOPage = pictureService.getPictureVOPage(picturePage, request);
-            String cacheValue = JSONUtil.toJsonStr(pictureVOPage);
-            int cacheExpireTime = 300 + RandomUtil.randomInt(0, 300);
-            valueOps.set(cacheKey, cacheValue, cacheExpireTime, TimeUnit.SECONDS);
-            localCache.put(cacheKey, cacheValue);
-        } finally {
-            if (Boolean.TRUE.equals(locked)) {
-                stringRedisTemplate.delete(lockKey);
-            }
-        }
-        return ResultUtils.success(pictureVOPage);
+        Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
+                pictureService.getQueryWrapper(pictureQueryRequest));
+        return ResultUtils.success(pictureService.getPictureVOPage(picturePage, request));
     }
 
 

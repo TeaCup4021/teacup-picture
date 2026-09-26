@@ -377,7 +377,7 @@ public class AiQuotaReconciliationService {
 **扫描一：预占悬挂（主扫描）**
 
 ```
-选取条件：quotaSettled = 0 AND quotaRefunded = 0 AND createTime < now - reconcileMinAge
+选取条件：quotaSettled = 0 AND quotaRefunded = 0 AND createTime < now - zombieAge
 批量上限：LIMIT 200，按 id 升序
 ```
 
@@ -385,10 +385,13 @@ public class AiQuotaReconciliationService {
 
 | 任务状态 | 处理 |
 |---|---|
-| `succeeded` | `settleQuota(task)`，审计 `action=repaired, reason=settled_missing` |
+| `succeeded` | `settleQuota(task)`，审计 `reason=settled_missing` |
 | `failed` / `cancelled` | `releaseReservation(task)` + 置 `quotaRefunded=1`，审计 `reason=release_missing` |
-| `queued` / `running` 且 `createTime < now - zombieAge` | 先 `exhaust(taskId)` 终态化，再归还预占，审计 `reason=zombie_task` |
-| `queued` / `running` 但未超 `zombieAge` | 跳过，属于正常生命周期 |
+| `queued` / `running` 且 `createTime < now - zombieAge` | 置 `failed`（`failureCode=reconcile_zombie`）+ 归还预占，审计 `reason=zombie_task` |
+| `queued` / `running` 但租约未过期、或未超 `zombieAge` | 跳过，属于正常生命周期 |
+
+> **候选筛选门槛与僵尸判定门槛是同一个配置值**（`reconcile-zombie-age-minutes`）。拆成两个必然出现「改一个忘一个」：候选门槛大于僵尸年龄时后者是永远不成立的死条件，小于时又会把正常重试中的任务扫进来。
+> **年龄按创建时间判定，不按最近一次状态变化时间**：重投会不断刷新后者，任务一旦陷入重投循环就永不满足条件、预占永久悬挂；按创建时间判定可保证任何任务在创建后 N 分钟内必然被处理一次。
 
 **扫描二：计数漂移修复（可选，建议在扫描一验证稳定后再开）**
 
@@ -417,15 +420,17 @@ public class AiQuotaReconciliationService {
 teacup:
   ai:
     quota:
-      reconcile-millis: 600000              # 10 分钟
-      reconcile-min-age-minutes: 360        # 预占超过 6 小时才纳入对账
-      reconcile-zombie-age-minutes: 120     # 非终态且超 2 小时视为僵尸任务
+      reconcile-millis: 600000                  # 10 分钟
+      reconcile-initial-delay-millis: 60000     # 启动后 60 秒首轮
+      reconcile-zombie-age-minutes: 11          # 候选筛选门槛＝僵尸判定门槛，同一个数
       reconcile-batch-size: 200
 ```
 
-> `reconcile-min-age-minutes` 必须大于任务的最长合法生命周期（队列等待 + 执行 + 全部重试 + 重试队列 TTL 合计）。
-> 当前重试阶梯为 5s/30s/120s、最多 4 次，队列侧理论最长等待远小于 6 小时，默认值安全。
-> 实施者如调整重试策略，必须同步复核该值。
+> `reconcile-zombie-age-minutes` 必须覆盖任务的最长合法生命周期，且**它同时是候选筛选门槛与僵尸判定门槛，只能有一个值**。
+> 推导：单次执行上限＝读超时 120s；最多 4 次提交 → 480s；退避 5/30/120s → 155s；合计 635s ≈ 10 分 35 秒，向上取整 11 分钟。
+> 用户侧最坏归还时间 ＝ 该值 ＋ 一轮扫描间隔（10 分钟）≈ **21 分钟**；再叠加首轮延迟 60 秒。
+> 实施者若调整重试阶梯或读超时，必须同步复核该值——它是这几个参数的函数，不是独立拍出来的数字。
+> **注意余量**：11 分钟与理论最长生命周期（10 分 35 秒）只差约 25 秒，靠的是"任务处于等待重试状态时年龄必然小于 11 分钟"这一性质。若重试阶梯或读超时上调，该值必须跟着上调，否则会把正常重试中的任务误判为僵尸。
 
 #### 2.4 `AiTaskService` 抽取统一收尾路径
 
@@ -580,23 +585,24 @@ try {
 | **T3** | 构造一个持续抛可重试异常的 provider，观察直到 `attemptCount` 达到 4 | 第 5 次抢占失败；任务被 `exhaust` 置为 `failed`、`failureCode=attempts_exhausted`；`reservedCount` 归零、`quotaRefunded=1` |
 | **T4** | 手动把某任务的 `attemptCount` 置为 4、`status` 置为 `queued`，投递消息 | 抢占失败 → `exhaust` 生效 → 不产生第 5 次 AI 调用 |
 | **T5** | 在 `renewLease` 与 `storeResult` 之间人工抛 `AiTaskLeaseLostException` | 任务最终 `ack`，不调用 `fail`，`failureCode` **不**被写成 `result_persistence_failed`；已存储的图片按既有逻辑丢弃 |
-| **T6** | 手工插入一条 `status='queued'`、`quotaSettled=0`、`quotaRefunded=0`、`createTime` 为 7 小时前的任务 | 对账任务在 `reconcile-zombie-age-minutes` 之后将其置为 `failed` 并归还预占；`ai_task_quota_audit` 出现 `reason=zombie_task` |
+| **T6** | 手工插入一条 `status='queued'`、`quotaSettled=0`、`quotaRefunded=0`、`createTime` 为 15 分钟前的任务 | 对账任务在 `reconcile-zombie-age-minutes`（默认 11 分钟）生效后将其置为 `failed` 并归还预占；`ai_task_quota_audit` 出现 `reason=zombie_task` |
 | **T7** | 向死信队列投递一条指向正常 `queued` 任务的消息 | `AiTaskDlqService` 消费后任务被终态化、预占归还、消息被 ack、**不**产生重新投递 |
 | **T8** | 同一用户使用同一幂等键并发发起 20 个相同请求 | 只创建 1 个任务；1 个返回 `created=true`，其余 19 个返回既有任务；`reservedCount` 只增加 1 次；无 `DuplicateKeyException` 泄漏到接口层 |
 | **T9** | 同一用户并发发起 50 个**不同**幂等键的请求，配额上限设为 10 | 恰好 10 个成功，40 个返回 `409 今日 AI 配额已用完`；`usedCount + reservedCount` 不超过 10 |
 | **T10** | 重启应用（模拟进程被强制杀死），期间存在 `running` 任务 | 重启后该任务被恢复服务接管并最终到达终态，预占被结算或归还，`reservedCount` 无残留 |
+| **T11** | 手工插入一条 `status='queued'`、`quotaSettled=0`、`quotaRefunded=0`、`createTime` 为 5 分钟前的任务 | 对账任务**不**处理它（未超 11 分钟门槛）：`quotaRefunded` 保持 0、`reservedCount` 不变、状态仍为 `queued`。这是「门槛不误杀正常重试任务」的反向用例，与 T6 配对 |
 
 ### 不变量（每次测试后都必须校验）
 
 以下 SQL 的返回结果必须为空：
 
 ```sql
--- 1. 终态任务不得仍有未结算的预占（超过对账最小年龄）
+-- 1. 终态任务不得仍有未结算的预占（超过僵尸年龄）
 SELECT id, status, quotaSettled, quotaRefunded, createTime
 FROM ai_task
 WHERE status IN ('succeeded','failed','cancelled')
   AND quotaSettled = 0 AND quotaRefunded = 0
-  AND createTime < NOW() - INTERVAL 6 HOUR;
+  AND createTime < NOW() - INTERVAL 11 MINUTE;
 
 -- 2. 执行中任务必须有租约
 SELECT id FROM ai_task WHERE status = 'running' AND leaseUntil IS NULL;

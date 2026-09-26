@@ -1,7 +1,6 @@
 package com.teacup.teacuppicturebackend.controller;
 
 
-import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.teacup.teacuppicturebackend.annotation.AuthCheck;
 import com.teacup.teacuppicturebackend.auth.model.SpaceUserAuthManager;
@@ -25,7 +24,6 @@ import com.teacup.teacuppicturebackend.service.SpaceService;
 import com.teacup.teacuppicturebackend.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
@@ -33,7 +31,6 @@ import javax.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -49,8 +46,6 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/space")
 public class SpaceController {
 
-    private static final String SPACE_CACHE_PREFIX = "teacuppicture:space:";
-
     private static final List<SpaceLevel> SPACE_LEVEL_LIST = Arrays.stream(SpaceLevelEnum.values())
             .map(e -> new SpaceLevel(e.getValue(), e.getText(), e.getMaxCount(), e.getMaxSize()))
             .collect(Collectors.toList());
@@ -63,9 +58,6 @@ public class SpaceController {
 
     @Resource
     private SpaceUserAuthManager spaceUserAuthManager;
-
-    @Resource
-    private StringRedisTemplate stringRedisTemplate;
 
     @PostMapping("/add")
     public BaseResponse<Long> addSpace(@RequestBody SpaceAddRequest spaceAddRequest, HttpServletRequest request) {
@@ -91,7 +83,6 @@ public class SpaceController {
         // 操作数据库
         boolean result = spaceService.removeById(id);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-        stringRedisTemplate.delete(SPACE_CACHE_PREFIX + id);
         return ResultUtils.success(true);
     }
 
@@ -123,7 +114,6 @@ public class SpaceController {
         // 操作数据库
         boolean result = spaceService.updateById(space);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-        stringRedisTemplate.delete(SPACE_CACHE_PREFIX + id);
         return ResultUtils.success(true);
     }
     @GetMapping("/get")
@@ -143,16 +133,8 @@ public class SpaceController {
     @GetMapping("/get/vo")
     public BaseResponse<SpaceVO> getSpaceVOById(long id, HttpServletRequest request) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
-        String cacheKey = SPACE_CACHE_PREFIX + id;
-        String cached = stringRedisTemplate.opsForValue().get(cacheKey);
-        Space space;
-        if (cached != null) {
-            space = JSONUtil.toBean(cached, Space.class);
-        } else {
-            space = spaceService.getById(id);
-            ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR);
-            stringRedisTemplate.opsForValue().set(cacheKey, JSONUtil.toJsonStr(space), 10, TimeUnit.MINUTES);
-        }
+        Space space = spaceService.getById(id);
+        ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR);
         SpaceVO spaceVO = spaceService.getSpaceVO(space, request);
         User loginUser = userService.getLoginUser(request);
         spaceVO.setPermissionList(spaceUserAuthManager.getPermissionList(space, loginUser));
@@ -217,7 +199,6 @@ public class SpaceController {
         // 操作数据库
         boolean result = spaceService.updateById(space);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-        stringRedisTemplate.delete(SPACE_CACHE_PREFIX + id);
         return ResultUtils.success(true);
     }
 

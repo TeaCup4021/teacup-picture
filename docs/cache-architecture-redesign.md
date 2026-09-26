@@ -1,8 +1,10 @@
 # 茶杯图库多级缓存重设计
 
-> 状态：设计基线，替代旧的多级缓存方案
+> 状态：**已被简化版取代（2026-09-25）**。本文件描述的原方案（Cache Gateway + 事务发件箱 + RabbitMQ 失效事件 + Redisson 分布式锁）已下线并移除，现行实现为「Caffeine 本地缓存（键含共享版本号）+ Redis 共享缓存 + 共享版本号轮询同步」，详情类精确删除、列表类版本号切换。设计与迁移说明见 `docs/缓存方案简化设计.html`。
 >
-> 更新日期：2026-09-21
+> 本文件保留作为决策过程记录：第 1、3、9.4 节（一致性立场、数据分类、依赖故障矩阵）仍然适用；第 4、5、7 节（统一网关、版本化 key、事务发件箱）与第 12 节（迁移步骤）描述的是旧实现，已过时。
+>
+> 更新日期：2026-09-21（架构） / 2026-09-25（状态标注）
 >
 > 适用范围：`backend/` 的 `/api/v1` 读路径、公开图库、图片元数据和后续空间/用户读模型。
 >
@@ -377,38 +379,38 @@ cache_payload_bytes{cache}
 
 ## 12. 迁移步骤
 
-### Phase 0：冻结边界
+### Phase 0：冻结边界（已完成）
 
 - 把 `backend/docs/缓存设计与问题处理.md` 标记为历史说明；本文件作为新基线。
 - 列出所有缓存/Redis key owner，禁止业务代码新增裸 key。
 - 将 Session、限流、AI 租约和 Cache 使用不同前缀；生产环境规划独立 Redis 资源。
 
-### Phase 1：建立基础设施
+### Phase 1：建立基础设施（已完成）
 
 - 新增 `CacheGateway`、`CacheSpec`、`CacheEnvelope`、`CacheSerializer`、`CacheMetrics`。
 - 实现 Caffeine L1、Redis L2、single-flight、有限等待和故障降级。
 - 增加统一 key canonicalizer 和 schema version。
 - 先只接入公开详情，保留旧实现作为 feature flag fallback。
 
-### Phase 2：建立可靠失效
+### Phase 2：建立可靠失效（已完成）
 
 - 增加 `cache_invalidation_outbox` Flyway migration；不要修改已有 `create_table.sql` 作为事实来源。
 - 在图片公开状态/公开字段写事务中写 outbox。
 - 使用已有 RabbitMQ Quorum Queue 和 Publisher Confirm 机制发布；消费者递增 generation 并清理本机 L1。
 - 增加 eventId 幂等表或可重放 offset，支持失败重试和死信告警。
 
-### Phase 3：迁移公开列表和 HTTP 层
+### Phase 3：迁移公开列表和 HTTP 层（已完成）
 
 - 将 `M1Service` 的公开列表/详情迁移到 Gateway；删除方法内的 JSON、Redisson 锁和 TTL 逻辑。
 - 删除 `PictureCacheClearObserver` 中的 `SCAN`、全量 wildcard delete 和未使用的“精准清理 TODO”。
 - 为公开接口加入 ETag、generation 和 hard TTL 对齐的 Cache-Control。
 
-### Phase 4：扩展与收口
+### Phase 4：扩展与收口（已完成）
 
-- 只在指标证明收益后接入标签/分类、用户公开摘要。
-- 私有列表不因“看起来能缓存”而强行接入；先优化 SQL、索引和权限查询。
-- 关闭旧 `/api/**` 查询缓存，清理无 owner 的遗留 key。
-- 默认 `mvn test` 加入单飞、负值、版本切换、事件幂等和故障降级测试；真实 Redis/RabbitMQ/Flyway 测试标记为 `integration`。
+- 公开图片详情/列表使用 Gateway；标签/分类、用户摘要保持按需接入原则，未因命中率目标强行缓存。
+- 私有列表和空间实体缓存已关闭，继续依赖权限检查、SQL 索引和分页约束。
+- 旧 `/api/**` 查询缓存、通配符删除和 `SCAN` 已移除。
+- 默认 `mvn test` 已覆盖单飞、负值、版本失效、Outbox 记录、`ETag` 和降级边界；真实 Redis/RabbitMQ/Flyway 流程保留为部署环境的集成验收项。
 
 ## 13. 验收标准
 
@@ -468,4 +470,3 @@ CDN 适合不可变公开二进制和公开 HTTP 响应，不适合私有权限�
 - 缓存带权限语义的 DTO 并跳过鉴权；
 - 用“随机 TTL”代替失效协议；
 - 为了追求缓存命中率，把所有查询都改成缓存查询。
-

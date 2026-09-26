@@ -200,7 +200,7 @@ class AiTaskServiceTest {
         quota.setReservedCount(1);
         when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
 
-        assertTrue(service.reconcile(31L, 120));
+        assertTrue(service.reconcile(31L, 11));
 
         assertEquals(1, task.getQuotaRefunded());
         assertEquals(0, quota.getReservedCount());
@@ -214,10 +214,42 @@ class AiTaskServiceTest {
         task.setLeaseUntil(LocalDateTime.now().plusMinutes(5));
         when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
 
-        assertFalse(service.reconcile(31L, 120));
+        assertFalse(service.reconcile(31L, 11));
 
         assertEquals("running", task.getStatus());
         verify(tasks, never()).updateById(any(AiTask.class));
+    }
+
+    @Test
+    void reconciliationReclaimsQueuedTaskOlderThanZombieAge() {
+        AiTask task = task("queued");
+        task.setCreateTime(LocalDateTime.now().minusMinutes(15));
+        quota.setReservedCount(1);
+        when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
+
+        assertTrue(service.reconcile(31L, 11));
+
+        assertEquals("failed", task.getStatus());
+        assertEquals("reconcile_zombie", task.getFailureCode());
+        assertEquals(1, task.getQuotaRefunded());
+        assertEquals(0, quota.getReservedCount());
+        verify(quotaAudits).insert(any(AiTaskQuotaAudit.class));
+    }
+
+    @Test
+    void reconciliationKeepsQueuedTaskYoungerThanZombieAge() {
+        AiTask task = task("queued");
+        task.setCreateTime(LocalDateTime.now().minusMinutes(5));
+        quota.setReservedCount(1);
+        when(tasks.selectOne(any(Wrapper.class))).thenReturn(task);
+
+        assertFalse(service.reconcile(31L, 11));
+
+        assertEquals("queued", task.getStatus());
+        assertEquals(0, task.getQuotaRefunded());
+        assertEquals(1, quota.getReservedCount());
+        verify(tasks, never()).updateById(any(AiTask.class));
+        verify(quotaAudits, never()).insert(any(AiTaskQuotaAudit.class));
     }
 
     @Test

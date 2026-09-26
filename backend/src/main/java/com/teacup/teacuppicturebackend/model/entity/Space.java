@@ -50,6 +50,13 @@ public class Space implements Serializable {
     @ApiModelProperty(value = "当前空间下的图片数量")
     private Long totalCount;
 
+    /**
+     * 在途预留的字节数：上传会话从创建到完成之间，声明的大小先占在这里。
+     * 额度约束是 totalSize + reservedSize + 本次 <= maxSize。
+     */
+    @ApiModelProperty(value = "在途预留的总大小")
+    private Long reservedSize;
+
     @ApiModelProperty(value = "创建用户 id")
     private Long userId;
 

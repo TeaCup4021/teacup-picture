@@ -30,4 +30,21 @@ class PictureAssetServiceTest {
 
         assertEquals(404, error.getStatus().value());
     }
+
+    @Test
+    void versionedPublicUrlRejectsAStalePictureVersion() {
+        PictureMapper mapper = mock(PictureMapper.class);
+        Picture picture = new Picture();
+        picture.setId(31L); picture.setIsDelete(0); picture.setVisibility("public");
+        picture.setPublishStatus("approved"); picture.setCurrentVersionId(300L); picture.setObjectKey("spaces/1/pictures/a.png");
+        when(mapper.selectById(31L)).thenReturn(picture);
+        PictureStorage storage = mock(PictureStorage.class);
+        PictureStorageConfig config = new PictureStorageConfig();
+        config.setPublicBaseUrl("http://127.0.0.1:8123/api/v1");
+        PictureAssetService service = new PictureAssetService(mapper, mock(UserService.class), storage, config);
+
+        assertThrows(V1Exception.class, () -> service.loadPublic(31L, 299L, "original"));
+        assertEquals("http://127.0.0.1:8123/api/v1/public/pictures/31/content?variant=original&version=300",
+                service.publicUrl(31L, 300L, "original"));
+    }
 }

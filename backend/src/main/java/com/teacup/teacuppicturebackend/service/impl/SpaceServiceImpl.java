@@ -5,6 +5,7 @@ import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.teacup.teacuppicturebackend.exception.BusinessException;
 import com.teacup.teacuppicturebackend.exception.ErrorCode;
@@ -64,6 +65,31 @@ public class SpaceServiceImpl extends ServiceImpl<SpaceMapper, Space> implements
     @Resource
     private SpaceUserMapper spaceUserMapper;
 
+    @Override
+    public boolean tryConsume(long spaceId, long size, long count) {
+        // 条件更新的唯一实现在 SpaceMapper 上，此处只做转发，避免出现第二份额度规则。
+        return getBaseMapper().tryConsume(spaceId, size, count);
+    }
+
+    @Override
+    public boolean reserve(long spaceId, long size) {
+        return getBaseMapper().reserve(spaceId, size);
+    }
+
+    @Override
+    public boolean settle(long spaceId, long reserved, long actual, long count) {
+        return getBaseMapper().settle(spaceId, reserved, actual, count);
+    }
+
+    @Override
+    public void releaseReservation(long spaceId, long size) {
+        getBaseMapper().releaseReservation(spaceId, size);
+    }
+
+    @Override
+    public void releaseUsage(long spaceId, long size, long count) {
+        getBaseMapper().releaseUsage(spaceId, size, count);
+    }
 
     /**
      * 校验数据

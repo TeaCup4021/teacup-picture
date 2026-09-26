@@ -31,11 +31,14 @@ public class AiTaskOutboxPublisher {
             fixedDelayString = "${teacup.ai.worker.outbox-poll-millis:1000}")
     public void publishDue() {
         LocalDateTime now = LocalDateTime.now();
+        // 不要按 id 排序：该索引以 status 为前导列，不可能产出全局 id 序，
+        // ORDER BY id 会让优化器在积压时放弃索引改走主键扫描（实测慢约 200 倍）。
+        // 投递不要求 FIFO，取到哪 50 条都可以。
         List<AiTaskOutbox> rows = outboxMapper.selectList(new LambdaQueryWrapper<AiTaskOutbox>()
                 .in(AiTaskOutbox::getStatus, "pending", "failed")
                 .le(AiTaskOutbox::getNextAttemptAt, now)
                 .and(query -> query.isNull(AiTaskOutbox::getLockUntil).or().le(AiTaskOutbox::getLockUntil, now))
-                .orderByAsc(AiTaskOutbox::getId).last("LIMIT 50"));
+                .last("LIMIT 50"));
         rows.forEach(row -> publish(row, now));
     }
 

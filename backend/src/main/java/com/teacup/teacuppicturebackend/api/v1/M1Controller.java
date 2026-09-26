@@ -7,6 +7,7 @@ import com.teacup.teacuppicturebackend.storage.PictureAssetService;
 import com.teacup.teacuppicturebackend.storage.PictureStorage;
 import org.springframework.core.io.Resource;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
@@ -17,6 +18,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import java.util.List;
+import java.time.Duration;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -216,18 +218,16 @@ public class M1Controller {
     public ResponseEntity<V1Response<M1Dtos.PublicPictureCursorPage>> publicPictures(
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "20") int limit,
+            @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
             HttpServletRequest request) {
-        return ResponseEntity.ok()
-                .cacheControl(CacheControl.maxAge(java.time.Duration.ofSeconds(30)).cachePublic())
-                .body(V1Response.success(service.publicPictures(cursor, limit), RequestIdFilter.get(request)));
+        return publicResponse(service.publicPictures(cursor, limit), request, ifNoneMatch, Duration.ofSeconds(10));
     }
 
     @GetMapping("/public/pictures/{pictureId}")
     public ResponseEntity<V1Response<M1Dtos.PublicPictureDetail>> publicPicture(@PathVariable String pictureId,
+                                                                                @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
                                                                                 HttpServletRequest request) {
-        return ResponseEntity.ok()
-                .cacheControl(CacheControl.maxAge(java.time.Duration.ofSeconds(30)).cachePublic())
-                .body(V1Response.success(service.publicPicture(parseId(pictureId)), RequestIdFilter.get(request)));
+        return publicResponse(service.publicPicture(parseId(pictureId)), request, ifNoneMatch, Duration.ofSeconds(30));
     }
 
     @GetMapping("/pictures/{pictureId}/content")
@@ -240,18 +240,63 @@ public class M1Controller {
 
     @GetMapping("/public/pictures/{pictureId}/content")
     public ResponseEntity<Resource> publicContent(@PathVariable String pictureId,
-                                                   @RequestParam(defaultValue = "original") String variant) {
-        return assetResponse(assets.loadPublic(parseId(pictureId), variant), false);
+                                                   @RequestParam(defaultValue = "original") String variant,
+                                                   @RequestParam(required = false) String version,
+                                                   @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
+        long parsedPictureId = parseId(pictureId);
+        Long parsedVersion = version == null || version.isBlank() ? null : parseId(version);
+        PictureStorage.StoredObject object = assets.loadPublic(parsedPictureId, parsedVersion, variant);
+        String etag = publicAssetEtag(parsedPictureId, parsedVersion, variant, object.size());
+        return assetResponse(object, false, etag, ifNoneMatch);
     }
 
     private static ResponseEntity<Resource> assetResponse(PictureStorage.StoredObject object, boolean privateAsset) {
-        CacheControl cache = privateAsset ? CacheControl.noStore() : CacheControl.maxAge(java.time.Duration.ofHours(1)).cachePublic();
-        return ResponseEntity.ok()
-                .cacheControl(cache)
+        return assetResponse(object, privateAsset, null, null);
+    }
+
+    private static ResponseEntity<Resource> assetResponse(PictureStorage.StoredObject object, boolean privateAsset,
+                                                           String etag, String ifNoneMatch) {
+        CacheControl cache = privateAsset ? CacheControl.noStore()
+                : CacheControl.maxAge(Duration.ofSeconds(60)).cachePublic().mustRevalidate();
+        if (!privateAsset && etagMatches(ifNoneMatch, etag)) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).cacheControl(cache).eTag(etag).build();
+        }
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok().cacheControl(cache);
+        if (etag != null) response.eTag(etag);
+        return response
                 .header("X-Content-Type-Options", "nosniff")
                 .contentLength(object.size())
                 .contentType(org.springframework.http.MediaType.parseMediaType(object.contentType()))
                 .body(object.resource());
+    }
+
+    private static <T> ResponseEntity<V1Response<T>> publicResponse(T data, HttpServletRequest request,
+                                                                      String ifNoneMatch, Duration maxAge) {
+        String etag = weakEtag(data);
+        CacheControl cache = CacheControl.maxAge(maxAge).cachePublic().mustRevalidate();
+        if (etagMatches(ifNoneMatch, etag)) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).cacheControl(cache).eTag(etag).build();
+        }
+        return ResponseEntity.ok().cacheControl(cache).eTag(etag)
+                .body(V1Response.success(data, RequestIdFilter.get(request)));
+    }
+
+    private static String publicAssetEtag(long pictureId, Long versionId, String variant, long size) {
+        return "W/\"p-" + pictureId + "-v-" + (versionId == null ? "current" : versionId)
+                + "-" + variant + "-" + size + "\"";
+    }
+
+    private static String weakEtag(Object value) {
+        return "W/\"" + Integer.toUnsignedString(value.hashCode(), 16) + "\"";
+    }
+
+    private static boolean etagMatches(String ifNoneMatch, String etag) {
+        if (ifNoneMatch == null || etag == null) return false;
+        for (String candidate : ifNoneMatch.split(",")) {
+            String normalized = candidate.trim();
+            if ("*".equals(normalized) || etag.equals(normalized)) return true;
+        }
+        return false;
     }
 
     private static long parseId(String value) {

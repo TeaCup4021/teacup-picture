@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.teacup.teacuppicturebackend.api.v1.model.M1Dtos;
 import com.teacup.teacuppicturebackend.api.v1.model.M3Dtos;
+import com.teacup.teacuppicturebackend.cache.PublicPictureInvalidation;
 import com.teacup.teacuppicturebackend.mapper.PictureDraftMapper;
 import com.teacup.teacuppicturebackend.mapper.PictureMapper;
 import com.teacup.teacuppicturebackend.mapper.PictureVersionMapper;
@@ -66,12 +67,14 @@ public class M3Service {
     private final PictureAssetService assets;
     private final ObjectMapper objectMapper;
     private final SpaceAccessService spaceAccess;
+    private final PublicPictureInvalidation pictureInvalidation;
 
     @Autowired
     public M3Service(PictureMapper pictureMapper, PictureDraftMapper draftMapper, PictureVersionMapper versionMapper,
                      PublishRequestMapper publishRequestMapper, SpaceMapper spaceMapper,
                      UserMapper userMapper, UserService userService, PictureStorage storage,
-                     PictureAssetService assets, ObjectMapper objectMapper, SpaceAccessService spaceAccess) {
+                     PictureAssetService assets, ObjectMapper objectMapper, SpaceAccessService spaceAccess,
+                     PublicPictureInvalidation pictureInvalidation) {
         this.pictureMapper = pictureMapper;
         this.draftMapper = draftMapper;
         this.versionMapper = versionMapper;
@@ -83,6 +86,7 @@ public class M3Service {
         this.assets = assets;
         this.objectMapper = objectMapper;
         this.spaceAccess = spaceAccess;
+        this.pictureInvalidation = pictureInvalidation;
     }
 
     /** Kept for pre-M4 focused unit tests; runtime injection uses SpaceAccessService. */
@@ -91,7 +95,7 @@ public class M3Service {
                      UserMapper userMapper, UserService userService, PictureStorage storage,
                      PictureAssetService assets, ObjectMapper objectMapper) {
         this(pictureMapper, draftMapper, versionMapper, publishRequestMapper, spaceMapper, userMapper,
-                userService, storage, assets, objectMapper, null);
+                userService, storage, assets, objectMapper, null, null);
     }
 
     public M3Dtos.EditorStateView getDraft(User user, long pictureId) {
@@ -235,9 +239,11 @@ public class M3Service {
         long sizeDelta = nz(source.getSize()) - nz(picture.getPicSize());
         ensureReplacementCapacity(space, sizeDelta);
         applyVersionToPicture(picture, source);
+        boolean wasPublic = isPublic(picture);
         resetPublication(picture);
         picture.setCurrentVersionId(restored.getId());
         pictureMapper.updateById(picture);
+        if (wasPublic) recordPublicPictureChange(picture.getId());
         updateSpaceSize(space.getId(), sizeDelta);
         clearDraft(pictureId);
         return detail(restored);
@@ -273,17 +279,15 @@ public class M3Service {
                 stored.size(), user.getId());
         applyStoredPicture(picture, stored);
         picture.setCurrentVersionId(saved.getId());
+        boolean wasPublic = isPublic(picture);
         resetPublication(picture);
         pictureMapper.updateById(picture);
+        if (wasPublic) recordPublicPictureChange(picture.getId());
         updateSpaceSize(space.getId(), sizeDelta);
     }
 
     private Picture savePictureCopy(User user, Picture source, Space space,
                                     PictureStorage.StoredPicture stored, String name) {
-        if (nz(space.getTotalCount()) >= nz(space.getMaxCount())
-                || nz(space.getTotalSize()) + stored.size() > nz(space.getMaxSize())) {
-            throw V1Exception.conflict("个人空间容量不足");
-        }
         Picture copy = new Picture();
         copy.setId(IdWorker.getId());
         copy.setUrl(assets.privateUrl(copy.getId(), "original"));
@@ -306,10 +310,10 @@ public class M3Service {
                 stored.thumbnailObjectKey(), stored.contentType(), stored.width(), stored.height(), stored.size(), user.getId());
         copy.setCurrentVersionId(initial.getId());
         pictureMapper.updateById(copy);
-        spaceMapper.update(null, new UpdateWrapper<Space>()
-                .eq("id", space.getId())
-                .setSql("totalSize = totalSize + " + stored.size())
-                .setSql("totalCount = totalCount + 1"));
+        // 额度校验与扣减必须是一条条件更新，理由见 SpaceMapper#tryConsume。
+        if (!spaceMapper.tryConsume(space.getId(), stored.size(), 1)) {
+            throw V1Exception.conflict("个人空间容量不足");
+        }
         return copy;
     }
 
@@ -385,6 +389,14 @@ public class M3Service {
         picture.setReviewTime(null);
     }
 
+    private void recordPublicPictureChange(long pictureId) {
+        if (pictureInvalidation != null) pictureInvalidation.pictureChanged(pictureId);
+    }
+
+    private static boolean isPublic(Picture picture) {
+        return "public".equals(picture.getVisibility()) && "approved".equals(picture.getPublishStatus());
+    }
+
     private void ensureReplacementCapacity(Space space, long sizeDelta) {
         if (nz(space.getTotalSize()) + sizeDelta > nz(space.getMaxSize())) {
             throw V1Exception.conflict("个人空间容量不足");
@@ -393,9 +405,16 @@ public class M3Service {
 
     private void updateSpaceSize(long spaceId, long sizeDelta) {
         if (sizeDelta == 0) return;
-        spaceMapper.update(null, new UpdateWrapper<Space>()
-                .eq("id", spaceId)
-                .setSql("totalSize = GREATEST(0, totalSize + (" + sizeDelta + "))"));
+        if (sizeDelta < 0) {
+            // 释放额度不会触及上限，也不涉及件数维度
+            spaceMapper.releaseUsage(spaceId, -sizeDelta, 0);
+            return;
+        }
+        // 增加用量必须带条件：ensureReplacementCapacity 只是提前失败，
+        // 并发下同一空间的两个请求可能都通过它，真正的保证由这条条件更新给出。
+        if (!spaceMapper.tryConsume(spaceId, sizeDelta, 0)) {
+            throw V1Exception.conflict("个人空间容量不足");
+        }
     }
 
     private Space requireSpace(long spaceId) {
